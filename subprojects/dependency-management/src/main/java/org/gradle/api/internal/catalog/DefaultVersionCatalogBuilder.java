@@ -29,7 +29,6 @@ import org.gradle.api.artifacts.MutableVersionConstraint;
 import org.gradle.api.artifacts.result.ResolvedArtifactResult;
 import org.gradle.api.attributes.Category;
 import org.gradle.api.attributes.Usage;
-import org.gradle.api.file.RegularFileProperty;
 import org.gradle.api.initialization.dsl.VersionCatalogBuilder;
 import org.gradle.api.internal.artifacts.DependencyResolutionServices;
 import org.gradle.api.internal.artifacts.ImmutableVersionConstraint;
@@ -44,19 +43,18 @@ import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.provider.Property;
-import org.gradle.api.provider.Provider;
 import org.gradle.api.provider.ProviderFactory;
 import org.gradle.internal.FileUtils;
 import org.gradle.internal.deprecation.DeprecationLogger;
+import org.gradle.internal.event.ListenerManager;
 import org.gradle.internal.lazy.Lazy;
 import org.gradle.internal.management.VersionCatalogBuilderInternal;
+import org.gradle.internal.resource.local.FileResourceListener;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;
-import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Locale;
@@ -96,6 +94,7 @@ public class DefaultVersionCatalogBuilder implements VersionCatalogBuilderIntern
     private final Interner<ImmutableVersionConstraint> versionConstraintInterner;
     private final ObjectFactory objects;
     private final ProviderFactory providers;
+    private ListenerManager listenerManager;
     private final String name;
     private final Map<String, VersionModel> versionConstraints = Maps.newLinkedHashMap();
     private final Map<String, Supplier<DependencyModel>> libraries = Maps.newLinkedHashMap();
@@ -120,6 +119,7 @@ public class DefaultVersionCatalogBuilder implements VersionCatalogBuilderIntern
         Interner<ImmutableVersionConstraint> versionConstraintInterner,
         ObjectFactory objects,
         ProviderFactory providers,
+        ListenerManager listenerManager,
         Supplier<DependencyResolutionServices> dependencyResolutionServicesSupplier
     ) {
         this.name = name;
@@ -127,6 +127,7 @@ public class DefaultVersionCatalogBuilder implements VersionCatalogBuilderIntern
         this.versionConstraintInterner = versionConstraintInterner;
         this.objects = objects;
         this.providers = providers;
+        this.listenerManager = listenerManager;
         this.dependencyResolutionServicesSupplier = dependencyResolutionServicesSupplier;
         this.strictVersionParser = new StrictVersionParser(strings);
         this.description = objects.property(String.class).convention("A catalog of dependencies accessible via the `" + name + "` extension.");
@@ -279,12 +280,10 @@ public class DefaultVersionCatalogBuilder implements VersionCatalogBuilderIntern
                     .documented()
             );
         }
-        RegularFileProperty srcProp = objects.fileProperty();
-        srcProp.set(modelFile);
-        Provider<byte[]> dataSource = providers.fileContents(srcProp).getAsBytes();
-        InputStream dataStream = new ByteArrayInputStream(dataSource.get());
         try {
-            TomlCatalogFileParser.parse(dataStream, modelFile.toPath(), this);
+            TomlCatalogFileParser.parse(modelFile.toPath(), this);
+            // Make configuration cache aware of the model file
+            listenerManager.getBroadcaster(FileResourceListener.class).fileObserved(modelFile);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

@@ -38,6 +38,7 @@ import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.provider.ProviderFactory;
+import org.gradle.internal.event.ListenerManager;
 
 import javax.inject.Inject;
 import java.util.Map;
@@ -59,9 +60,10 @@ public class DependenciesAwareVersionCatalogBuilder extends DefaultVersionCatalo
                                                   Interner<ImmutableVersionConstraint> versionConstraintInterner,
                                                   ObjectFactory objects,
                                                   ProviderFactory providers,
+                                                  ListenerManager listenerManager,
                                                   Supplier<DependencyResolutionServices> dependencyResolutionServicesSupplier,
                                                   Configuration dependenciesConfiguration) {
-        super(name, strings, versionConstraintInterner, objects, providers, dependencyResolutionServicesSupplier);
+        super(name, strings, versionConstraintInterner, objects, providers, listenerManager, dependencyResolutionServicesSupplier);
         this.dependenciesConfiguration = dependenciesConfiguration;
     }
 
