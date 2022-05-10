@@ -18,13 +18,16 @@ package org.gradle.api.plugins.catalog.internal
 
 import com.google.common.collect.Interners
 import groovy.transform.Canonical
+import org.gradle.api.InvalidUserDataException
 import org.gradle.api.internal.catalog.DefaultVersionCatalog
 import org.gradle.api.internal.catalog.DefaultVersionCatalogBuilder
 import org.gradle.api.internal.catalog.parser.TomlCatalogFileParser
 import org.gradle.util.TestUtil
+import spock.lang.IgnoreRest
 import spock.lang.Specification
 import spock.lang.Subject
 
+import java.nio.file.Path
 import java.util.function.Supplier
 
 class TomlWriterTest extends Specification {
@@ -66,16 +69,34 @@ format.version = "1.1"
 """
     }
 
+    @IgnoreRest
+    def "error contains absolute path"() {
+        when:
+        parse("wrong")
+
+        then:
+        def exception = thrown(InvalidUserDataException.class)
+        exception.message.contains("In file '")
+        exception.message.contains("wrong.toml'")
+    }
+
     private void generateFromModel() {
         writer.generate(sourceModel.deps)
-        outputModel = parse(new ByteArrayInputStream(output.toString().getBytes("utf-8")))
+        outputModel = parse(
+            new ByteArrayInputStream(output.toString().getBytes("utf-8")),
+            // Doesn't need to exist, only used for error reporting purposes
+            Path.of("test.toml"),
+        )
     }
 
     private Model parse(String fileName) {
-        sourceModel = parse(this.class.getResourceAsStream("${fileName}.toml"))
+        sourceModel = parse(
+            this.class.getResourceAsStream("${fileName}.toml"),
+            Path.of("${fileName}.toml")
+        )
     }
 
-    private Model parse(InputStream ins) {
+    private Model parse(InputStream inputStream, Path path) {
         def builder = new DefaultVersionCatalogBuilder("libs",
             Interners.newStrongInterner(),
             Interners.newStrongInterner(),
@@ -83,8 +104,8 @@ format.version = "1.1"
             TestUtil.providerFactory()
             ,
             Stub(Supplier))
-        ins.withCloseable {
-            TomlCatalogFileParser.parse(it, builder)
+        inputStream.withCloseable {
+            TomlCatalogFileParser.parse(it, path, builder)
         }
         return new Model(builder.build())
     }
