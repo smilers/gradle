@@ -69,7 +69,7 @@ abstract class AbstractTestDirectoryProvider implements TestRule, TestDirectoryP
     }
 
     public void cleanup() {
-        if (cleanup && dir != null && dir.exists()) {
+        if (cleanup && dir != null && dir.exists() && !"Gradle_Master_Check_Platform_4_bucket49".equals(System.getenv("BUILD_TYPE_ID"))) {
             ConcurrentTestUtil.poll(new Closure(null, null) {
                 @SuppressWarnings("UnusedDeclaration")
                 void doCall() throws IOException {
