@@ -16,9 +16,12 @@
 package org.gradle.api.artifacts.dsl;
 
 import groovy.lang.Closure;
+import groovy.lang.DelegatesTo;
 import org.gradle.api.Action;
 import org.gradle.api.artifacts.ConfigurablePublishArtifact;
 import org.gradle.api.artifacts.PublishArtifact;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
 /**
  * This class is for defining artifacts to be published and adding them to configurations. Creating publish artifacts
@@ -74,6 +77,7 @@ import org.gradle.api.artifacts.PublishArtifact;
  * }
  * </pre>
  */
+@ServiceScope(Scope.Project.class)
 public interface ArtifactHandler {
     /**
      * Adds an artifact to the given configuration.
@@ -92,7 +96,7 @@ public interface ArtifactHandler {
      * @param configureClosure The closure to execute to configure the artifact.
      * @return The artifact.
      */
-    PublishArtifact add(String configurationName, Object artifactNotation, Closure configureClosure);
+    PublishArtifact add(String configurationName, Object artifactNotation, @DelegatesTo(ConfigurablePublishArtifact.class) Closure configureClosure);
 
     /**
      * Adds an artifact to the given configuration.

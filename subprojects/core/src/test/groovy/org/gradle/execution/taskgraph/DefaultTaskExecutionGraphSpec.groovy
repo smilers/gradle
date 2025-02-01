@@ -24,43 +24,48 @@ import org.gradle.api.Task
 import org.gradle.api.execution.TaskExecutionGraphListener
 import org.gradle.api.execution.TaskExecutionListener
 import org.gradle.api.internal.BuildScopeListenerRegistrationListener
-import org.gradle.api.internal.DocumentationRegistry
 import org.gradle.api.internal.TaskInputsInternal
 import org.gradle.api.internal.TaskInternal
 import org.gradle.api.internal.TaskOutputsInternal
+import org.gradle.api.internal.file.TestFiles
 import org.gradle.api.internal.project.ProjectInternal
 import org.gradle.api.internal.project.ProjectStateRegistry
-import org.gradle.api.internal.project.taskfactory.TaskIdentity
+import org.gradle.api.internal.project.taskfactory.TestTaskIdentities
 import org.gradle.api.internal.tasks.NodeExecutionContext
+import org.gradle.api.internal.tasks.TaskDependencyFactory
+import org.gradle.api.internal.tasks.TaskDependencyInternal
 import org.gradle.api.internal.tasks.TaskDestroyablesInternal
 import org.gradle.api.internal.tasks.TaskLocalStateInternal
 import org.gradle.api.internal.tasks.TaskStateInternal
 import org.gradle.api.specs.Spec
-import org.gradle.api.tasks.TaskDependency
 import org.gradle.composite.internal.BuildTreeWorkGraphController
 import org.gradle.configuration.internal.TestListenerBuildOperationDecorator
 import org.gradle.execution.plan.AbstractExecutionPlanSpec
 import org.gradle.execution.plan.DefaultExecutionPlan
 import org.gradle.execution.plan.DefaultPlanExecutor
+import org.gradle.execution.plan.ExecutionNodeAccessHierarchies
 import org.gradle.execution.plan.ExecutionNodeAccessHierarchy
+import org.gradle.execution.plan.FinalizedExecutionPlan
 import org.gradle.execution.plan.LocalTaskNode
 import org.gradle.execution.plan.Node
 import org.gradle.execution.plan.NodeExecutor
+import org.gradle.execution.plan.OrdinalGroupFactory
 import org.gradle.execution.plan.PlanExecutor
 import org.gradle.execution.plan.SelfExecutingNode
 import org.gradle.execution.plan.TaskDependencyResolver
 import org.gradle.execution.plan.TaskNodeDependencyResolver
 import org.gradle.execution.plan.TaskNodeFactory
 import org.gradle.initialization.BuildCancellationToken
-import org.gradle.internal.concurrent.DefaultParallelismConfiguration
+import org.gradle.internal.buildoption.DefaultInternalOptions
 import org.gradle.internal.concurrent.ExecutorFactory
 import org.gradle.internal.concurrent.ManagedExecutor
 import org.gradle.internal.event.DefaultListenerManager
 import org.gradle.internal.file.Stat
-import org.gradle.internal.operations.TestBuildOperationExecutor
+import org.gradle.internal.operations.TestBuildOperationRunner
 import org.gradle.internal.service.ServiceRegistry
-import org.gradle.internal.service.scopes.Scopes
+import org.gradle.internal.service.scopes.Scope
 import org.gradle.internal.work.DefaultWorkerLeaseService
+import org.gradle.internal.work.DefaultWorkerLimits
 import org.gradle.internal.work.WorkerLeaseRegistry
 import org.gradle.util.Path
 
@@ -68,30 +73,33 @@ import static org.gradle.internal.snapshot.CaseSensitivity.CASE_SENSITIVE
 
 class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
     def cancellationToken = Mock(BuildCancellationToken)
-    def listenerManager = new DefaultListenerManager(Scopes.Build)
+    def listenerManager = new DefaultListenerManager(Scope.Build)
     def graphListeners = listenerManager.createAnonymousBroadcaster(TaskExecutionGraphListener.class)
     def taskExecutionListeners = listenerManager.createAnonymousBroadcaster(TaskExecutionListener.class)
     def listenerRegistrationListener = listenerManager.getBroadcaster(BuildScopeListenerRegistrationListener.class)
     def nodeExecutor = Mock(NodeExecutor)
-    def buildOperationExecutor = new TestBuildOperationExecutor()
+    def buildOperationRunner = new TestBuildOperationRunner()
     def listenerBuildOperationDecorator = new TestListenerBuildOperationDecorator()
-    def parallelismConfiguration = new DefaultParallelismConfiguration(true, 1)
-    def workerLeases = new DefaultWorkerLeaseService(coordinator, parallelismConfiguration)
+    def workerLimits = new DefaultWorkerLimits(1)
+    def workerLeases = new DefaultWorkerLeaseService(coordinator, workerLimits)
     def executorFactory = Mock(ExecutorFactory)
-    def taskNodeFactory = new TaskNodeFactory(thisBuild, Stub(DocumentationRegistry), Stub(BuildTreeWorkGraphController), nodeValidator)
+    def accessHierarchies = new ExecutionNodeAccessHierarchies(CASE_SENSITIVE, Stub(Stat))
+    def taskNodeFactory = new TaskNodeFactory(thisBuild, Stub(BuildTreeWorkGraphController), nodeValidator, new TestBuildOperationRunner(), accessHierarchies)
     def dependencyResolver = new TaskDependencyResolver([new TaskNodeDependencyResolver(taskNodeFactory)])
     def projectStateRegistry = Stub(ProjectStateRegistry)
     def executionPlan = newExecutionPlan()
     def taskGraph = new DefaultTaskExecutionGraph(
-        new DefaultPlanExecutor(parallelismConfiguration, executorFactory, workerLeases, cancellationToken, coordinator),
+        new DefaultPlanExecutor(workerLimits, executorFactory, workerLeases, cancellationToken, coordinator, new DefaultInternalOptions([:])),
         [nodeExecutor],
-        buildOperationExecutor,
+        buildOperationRunner,
         listenerBuildOperationDecorator,
         thisBuild,
         graphListeners,
         taskExecutionListeners,
         listenerRegistrationListener,
-        Stub(ServiceRegistry)
+        Stub(ServiceRegistry) {
+            get(TaskDependencyFactory) >> TestFiles.taskDependencyFactory()
+        }
     )
     WorkerLeaseRegistry.WorkerLeaseCompletion parentWorkerLease
     def executedTasks = []
@@ -123,10 +131,10 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
         def a = brokenTask("a", failure)
 
         given:
-        populate([a])
+        def finalizedPlan = populate([a])
 
         when:
-        def result = taskGraph.execute(executionPlan)
+        def result = taskGraph.execute(finalizedPlan)
 
         then:
         result.failures == [failure]
@@ -294,9 +302,9 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
         Task c = task("c")
 
         when:
-        populate([b])
+        def finalizedPlan = populate([b])
         taskGraph.allTasks
-        taskGraph.execute(executionPlan)
+        taskGraph.execute(finalizedPlan)
 
         then:
         // tests existing behaviour, not desired behaviour
@@ -308,8 +316,8 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
         def plan2 = newExecutionPlan()
         plan2.addEntryTasks([c])
         plan2.determineExecutionPlan()
-        plan2.finalizePlan()
-        taskGraph.populate(plan2)
+        def finalizedPlan2 = plan2.finalizePlan()
+        taskGraph.populate(finalizedPlan2)
 
         then:
         !taskGraph.hasTask(":a")
@@ -333,15 +341,15 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
         def plan2 = newExecutionPlan()
         plan2.addEntryTasks([c])
         plan2.determineExecutionPlan()
-        plan2.finalizePlan()
-        taskGraph.populate(plan2)
+        def finalizedPlan2 = plan2.finalizePlan()
+        taskGraph.populate(finalizedPlan2)
 
         then:
         taskGraph.allTasks == [c]
 
         when:
         executedTasks.clear()
-        def result2 = taskGraph.execute(plan2)
+        def result2 = taskGraph.execute(finalizedPlan2)
 
         then:
         executedTasks == [c]
@@ -366,7 +374,7 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
         def taskGraph = new DefaultTaskExecutionGraph(
             planExecutor,
             [nodeExecutor],
-            buildOperationExecutor,
+            buildOperationRunner,
             listenerBuildOperationDecorator,
             thisBuild,
             graphListeners,
@@ -375,13 +383,12 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
             Stub(ServiceRegistry)
         )
         TaskExecutionGraphListener listener = Mock(TaskExecutionGraphListener)
-        Task a = task("a")
 
         when:
         taskGraph.addTaskExecutionGraphListener(listener)
-        executionPlan.addEntryTasks([a])
-        taskGraph.populate(executionPlan)
-        taskGraph.execute(executionPlan)
+        def finalizedPlan = Stub(FinalizedExecutionPlan)
+        taskGraph.populate(finalizedPlan)
+        taskGraph.execute(finalizedPlan)
 
         then:
         1 * listener.graphPopulated(_)
@@ -390,8 +397,8 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
         1 * planExecutor.process(_, _)
 
         when:
-        taskGraph.populate(executionPlan)
-        taskGraph.execute(executionPlan)
+        taskGraph.populate(finalizedPlan)
+        taskGraph.execute(finalizedPlan)
 
         then:
         0 * listener._
@@ -402,7 +409,7 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
         def taskGraph = new DefaultTaskExecutionGraph(
             planExecutor,
             [nodeExecutor],
-            buildOperationExecutor,
+            buildOperationRunner,
             listenerBuildOperationDecorator,
             thisBuild,
             graphListeners,
@@ -417,9 +424,9 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
         when:
         taskGraph.whenReady(closure)
         taskGraph.whenReady(action)
-        executionPlan.addEntryTasks([a])
-        taskGraph.populate(executionPlan)
-        taskGraph.execute(executionPlan)
+        def finalizedPlan = Stub(FinalizedExecutionPlan)
+        taskGraph.populate(finalizedPlan)
+        taskGraph.execute(finalizedPlan)
 
         then:
         1 * closure.call()
@@ -429,16 +436,16 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
         1 * planExecutor.process(_, _)
 
         and:
-        with(buildOperationExecutor.operations[0]) {
+        with(buildOperationRunner.operations[0]) {
             name == 'Notify task graph whenReady listeners'
             displayName == 'Notify task graph whenReady listeners'
             details.buildPath == ':'
         }
 
         when:
-        def plan2 = newExecutionPlan()
-        taskGraph.populate(plan2)
-        taskGraph.execute(plan2)
+        def finalizedPlan2 = Stub(FinalizedExecutionPlan)
+        taskGraph.populate(finalizedPlan2)
+        taskGraph.execute(finalizedPlan2)
 
         then:
         0 * closure._
@@ -525,14 +532,14 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
         }
 
         when:
-        executionPlan.useFilter(spec)
-        populate([a, b])
+        executionPlan.addFilter(spec)
+        def finalizedPlan = populate([a, b])
 
         then:
         taskGraph.allTasks == [b]
 
         when:
-        def result = taskGraph.execute(executionPlan)
+        def result = taskGraph.execute(finalizedPlan)
 
         then:
         executedTasks == [b]
@@ -550,14 +557,14 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
         }
 
         when:
-        executionPlan.useFilter(spec)
-        populate([c])
+        executionPlan.addFilter(spec)
+        def finalizedPlan = populate([c])
 
         then:
         taskGraph.allTasks == [b, c]
 
         when:
-        def result = taskGraph.execute(executionPlan)
+        def result = taskGraph.execute(finalizedPlan)
 
         then:
         executedTasks == [b, c]
@@ -572,7 +579,7 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
 
         when:
         executionPlan.continueOnFailure = true
-        executionPlan.useFilter(new Spec<Task>() {
+        executionPlan.addFilter(new Spec<Task>() {
             boolean isSatisfiedBy(Task element) {
                 return element != b
             }
@@ -584,33 +591,34 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
         failures == [failure]
     }
 
-    private void populate(List<Task> tasks) {
+    private FinalizedExecutionPlan populate(List<Task> tasks) {
         executionPlan.addEntryTasks(tasks)
         executionPlan.determineExecutionPlan()
-        executionPlan.finalizePlan()
-        taskGraph.populate(executionPlan)
+        def finalizedPlan = executionPlan.finalizePlan()
+        taskGraph.populate(finalizedPlan)
+        return finalizedPlan
     }
 
     void populateAndExecute(List<Task> tasks) {
-        populate(tasks)
+        def finalizedPlan = populate(tasks)
         executedTasks.clear()
         failures.clear()
-        def result = taskGraph.execute(executionPlan)
+        def result = taskGraph.execute(finalizedPlan)
         failures.addAll(result.failures)
     }
 
     void execute() {
         executionPlan.determineExecutionPlan()
-        executionPlan.finalizePlan()
-        taskGraph.populate(executionPlan)
+        def finalizedPlan = executionPlan.finalizePlan()
+        taskGraph.populate(finalizedPlan)
         executedTasks.clear()
         failures.clear()
-        def result = taskGraph.execute(executionPlan)
+        def result = taskGraph.execute(finalizedPlan)
         failures.addAll(result.failures)
     }
 
     private DefaultExecutionPlan newExecutionPlan() {
-        return new DefaultExecutionPlan(Path.ROOT.toString(), taskNodeFactory, dependencyResolver, new ExecutionNodeAccessHierarchy(CASE_SENSITIVE, Stub(Stat)), new ExecutionNodeAccessHierarchy(CASE_SENSITIVE, Stub(Stat)), coordinator)
+        return new DefaultExecutionPlan(Path.ROOT.toString(), taskNodeFactory, new OrdinalGroupFactory(), dependencyResolver, new ExecutionNodeAccessHierarchy(CASE_SENSITIVE, Stub(Stat)), new ExecutionNodeAccessHierarchy(CASE_SENSITIVE, Stub(Stat)), coordinator)
     }
 
     def task(String name, Task... dependsOn = []) {
@@ -637,11 +645,11 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
             getFailure() >> failure
             rethrowFailure() >> { throw failure }
         }
-        _ * mock.taskDependencies >> Stub(TaskDependency)
-        _ * mock.lifecycleDependencies >> Stub(TaskDependency)
-        _ * mock.finalizedBy >> Stub(TaskDependency)
-        _ * mock.mustRunAfter >> Stub(TaskDependency)
-        _ * mock.shouldRunAfter >> Stub(TaskDependency)
+        _ * mock.taskDependencies >> Stub(TaskDependencyInternal)
+        _ * mock.lifecycleDependencies >> Stub(TaskDependencyInternal)
+        _ * mock.finalizedBy >> Stub(TaskDependencyInternal)
+        _ * mock.mustRunAfter >> Stub(TaskDependencyInternal)
+        _ * mock.shouldRunAfter >> Stub(TaskDependencyInternal)
         _ * mock.sharedResources >> []
         _ * mock.compareTo(_) >> { Task t -> name.compareTo(t.name) }
         _ * mock.outputs >> Stub(TaskOutputsInternal)
@@ -649,7 +657,7 @@ class DefaultTaskExecutionGraphSpec extends AbstractExecutionPlanSpec {
         _ * mock.destroyables >> Stub(TaskDestroyablesInternal)
         _ * mock.localState >> Stub(TaskLocalStateInternal)
         _ * mock.path >> ":${name}"
-        _ * mock.taskIdentity >> TaskIdentity.create(name, DefaultTask, project as ProjectInternal)
+        _ * mock.taskIdentity >> TestTaskIdentities.create(name, DefaultTask, project as ProjectInternal)
         return mock
     }
 }

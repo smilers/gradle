@@ -17,18 +17,29 @@
 package org.gradle.invocation
 
 import org.gradle.api.Action
+import org.gradle.api.Project
+import org.gradle.api.ProjectEvaluationListener
+import org.gradle.api.ProjectState
+import org.gradle.api.Task
+import org.gradle.api.execution.TaskExecutionListener
 import org.gradle.api.initialization.dsl.ScriptHandler
+import org.gradle.api.internal.BuildScopeListenerRegistrationListener
 import org.gradle.api.internal.GradleInternal
+import org.gradle.api.internal.MutationGuard
 import org.gradle.api.internal.SettingsInternal
 import org.gradle.api.internal.StartParameterInternal
 import org.gradle.api.internal.file.FileResolver
 import org.gradle.api.internal.project.CrossProjectConfigurator
+import org.gradle.api.internal.project.CrossProjectModelAccess
+import org.gradle.api.internal.project.LifecycleAwareProject
 import org.gradle.api.internal.project.ProjectInternal
 import org.gradle.api.internal.tasks.TaskContainerInternal
+import org.gradle.api.tasks.TaskState
 import org.gradle.configuration.internal.ListenerBuildOperationDecorator
 import org.gradle.configuration.internal.TestListenerBuildOperationDecorator
 import org.gradle.execution.taskgraph.TaskExecutionGraphInternal
 import org.gradle.initialization.ClassLoaderScopeRegistry
+import org.gradle.initialization.SettingsState
 import org.gradle.internal.build.DefaultPublicBuildPath
 import org.gradle.internal.build.PublicBuildPath
 import org.gradle.internal.enterprise.core.GradleEnterprisePluginManager
@@ -38,10 +49,11 @@ import org.gradle.internal.installation.CurrentGradleInstallation
 import org.gradle.internal.installation.GradleInstallation
 import org.gradle.internal.instantiation.InstantiatorFactory
 import org.gradle.internal.management.DependencyResolutionManagementInternal
-import org.gradle.internal.operations.BuildOperationExecutor
-import org.gradle.internal.operations.TestBuildOperationExecutor
+import org.gradle.internal.operations.BuildOperationRunner
+import org.gradle.internal.operations.TestBuildOperationRunner
+import org.gradle.internal.reflect.Instantiator
 import org.gradle.internal.service.ServiceRegistry
-import org.gradle.internal.service.scopes.Scopes
+import org.gradle.internal.service.scopes.Scope
 import org.gradle.internal.service.scopes.ServiceRegistryFactory
 import org.gradle.model.internal.registry.ModelRegistry
 import org.gradle.util.GradleVersion
@@ -55,9 +67,12 @@ class DefaultGradleSpec extends Specification {
 
     StartParameterInternal parameter = new StartParameterInternal()
     CurrentGradleInstallation currentGradleInstallation = Mock(CurrentGradleInstallation)
-    BuildOperationExecutor buildOperationExecutor = new TestBuildOperationExecutor()
+    BuildOperationRunner buildOperationRunner = new TestBuildOperationRunner()
     ListenerBuildOperationDecorator listenerBuildOperationDecorator = new TestListenerBuildOperationDecorator()
-    CrossProjectConfigurator crossProjectConfigurator = Mock(CrossProjectConfigurator)
+    CrossProjectConfigurator crossProjectConfigurator = Mock(CrossProjectConfigurator) {
+        getLazyBehaviorGuard() >> Mock(MutationGuard)
+    }
+    GradleLifecycleActionExecutor gradleLifecycleActionExecutor = Mock(GradleLifecycleActionExecutor)
 
     GradleInternal gradle
 
@@ -73,12 +88,21 @@ class DefaultGradleSpec extends Specification {
         _ * serviceRegistry.get(InstantiatorFactory) >> Mock(InstantiatorFactory)
         _ * serviceRegistry.get(ListenerManager) >> listenerManager
         _ * serviceRegistry.get(CurrentGradleInstallation) >> currentGradleInstallation
-        _ * serviceRegistry.get(BuildOperationExecutor) >> buildOperationExecutor
+        _ * serviceRegistry.get(BuildOperationRunner) >> buildOperationRunner
         _ * serviceRegistry.get(ListenerBuildOperationDecorator) >> listenerBuildOperationDecorator
         _ * serviceRegistry.get(CrossProjectConfigurator) >> crossProjectConfigurator
+        _ * serviceRegistry.get(CrossProjectModelAccess) >> Stub(CrossProjectModelAccess)
         _ * serviceRegistry.get(PublicBuildPath) >> new DefaultPublicBuildPath(Path.ROOT)
         _ * serviceRegistry.get(DependencyResolutionManagementInternal) >> Stub(DependencyResolutionManagementInternal)
         _ * serviceRegistry.get(GradleEnterprisePluginManager) >> new GradleEnterprisePluginManager()
+        _ * serviceRegistry.get(IsolatedProjectEvaluationListenerProvider) >> Stub(TestIsolatedProjectEvaluationListenerProvider)
+        _ * serviceRegistry.get(GradleLifecycleActionExecutor) >> gradleLifecycleActionExecutor
+        _ * serviceRegistry.get(Instantiator) >> Stub(Instantiator) {
+            newInstance(LifecycleAwareProject, _, _, _) >> { args ->
+                def params = args[1]
+                new LifecycleAwareProject(params[0], params[1], gradleLifecycleActionExecutor)
+            }
+        }
 
         gradle = TestUtil.instantiatorFactory().decorateLenient().newInstance(DefaultGradle.class, null, parameter, serviceRegistryFactory)
     }
@@ -313,10 +337,40 @@ class DefaultGradleSpec extends Specification {
 
         when:
         def settings = Stub(SettingsInternal)
-        gradle.settings = settings
+        def state = Stub(SettingsState) {
+            _ * getSettings() >> settings
+        }
+        gradle.attachSettings(state)
 
         then:
         gradle.settings == settings
+    }
+
+    def "closes settings when replaced"() {
+        def state1 = Mock(SettingsState)
+        def state2 = Stub(SettingsState)
+
+        given:
+        gradle.attachSettings(state1)
+
+        when:
+        gradle.attachSettings(state2)
+
+        then:
+        1 * state1.close()
+    }
+
+    def "closes settings when discarded"() {
+        def state = Mock(SettingsState)
+
+        given:
+        gradle.attachSettings(state)
+
+        when:
+        gradle.resetState()
+
+        then:
+        1 * state.close()
     }
 
     def "get root project throws exception when root project is not available"() {
@@ -389,6 +443,39 @@ class DefaultGradleSpec extends Specification {
         gradle.toString() == "build 'rootProject'"
     }
 
+    @SuppressWarnings("deprecation")
+    interface UnsupportedDescendant extends TaskExecutionListener, ProjectEvaluationListener {}
+
+    def "notifies observers when a descendant of unsupported listener interface is added"() {
+        given:
+        def registrationListener = Mock(BuildScopeListenerRegistrationListener)
+        listenerManager.addListener(registrationListener)
+        when:
+        gradle.addListener(new UnsupportedDescendant() {
+            @Override
+            void beforeEvaluate(Project project) {
+            }
+
+            @Override
+            void afterEvaluate(Project project, ProjectState state) {
+            }
+
+            @Override
+            void beforeExecute(Task task) {
+            }
+
+            @Override
+            void afterExecute(Task task, TaskState state) {
+            }
+        })
+
+        then:
+        1 * registrationListener.onBuildScopeListenerRegistration(_, _, gradle)
+
+        cleanup:
+        listenerManager.removeListener(registrationListener)
+    }
+
     private ProjectInternal project(String name) {
         def project = Mock(ProjectInternal)
         _ * project.name >> name
@@ -397,7 +484,9 @@ class DefaultGradleSpec extends Specification {
 
     static class TestListenerManager extends DefaultListenerManager {
         TestListenerManager() {
-            super(Scopes.Build)
+            super(Scope.Build)
         }
     }
+
+    static interface TestIsolatedProjectEvaluationListenerProvider extends IsolatedProjectEvaluationListenerProvider, GradleLifecycleActionExecutor {}
 }

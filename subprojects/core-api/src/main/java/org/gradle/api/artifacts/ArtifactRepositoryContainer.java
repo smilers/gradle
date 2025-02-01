@@ -16,7 +16,7 @@
 package org.gradle.api.artifacts;
 
 import groovy.lang.Closure;
-
+import groovy.lang.DelegatesTo;
 import org.gradle.api.Action;
 import org.gradle.api.NamedDomainObjectList;
 import org.gradle.api.artifacts.repositories.ArtifactRepository;
@@ -32,17 +32,17 @@ import org.gradle.util.Configurable;
  * resolver as the property name. For example:</p>
  *
  * <pre class='autoTested'>
- * repositories.maven { name 'myResolver' }
- * repositories.myResolver.url = 'some-url'
+ * repositories.maven { name = 'myResolver' }
+ * repositories.myResolver.url = uri('some-url')
  * </pre>
  *
  * <p>A dynamic method is added for each resolver which takes a configuration closure. This is equivalent to calling
  * {@link #getByName(String, groovy.lang.Closure)}. For example:</p>
  *
  * <pre class='autoTested'>
- * repositories.maven { name 'myResolver' }
+ * repositories.maven { name = 'myResolver' }
  * repositories.myResolver {
- *     url 'some-url'
+ *     url = uri('some-url')
  * }
  * </pre>
  */
@@ -84,7 +84,7 @@ public interface ArtifactRepositoryContainer extends NamedDomainObjectList<Artif
      * {@inheritDoc}
      */
     @Override
-    ArtifactRepository getByName(String name, Closure configureClosure) throws UnknownRepositoryException;
+    ArtifactRepository getByName(String name, @DelegatesTo(ArtifactRepository.class) Closure configureClosure) throws UnknownRepositoryException;
 
     /**
      * {@inheritDoc}

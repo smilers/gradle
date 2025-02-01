@@ -17,9 +17,10 @@
 package org.gradle.plugin.management;
 
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.artifacts.dsl.RepositoryHandler;
 import org.gradle.api.initialization.ConfigurableIncludedPluginBuild;
+import org.gradle.declarative.dsl.model.annotations.Adding;
+import org.gradle.declarative.dsl.model.annotations.Configuring;
 import org.gradle.internal.HasInternalProtocol;
 import org.gradle.plugin.use.PluginDependenciesSpec;
 
@@ -34,6 +35,7 @@ public interface PluginManagementSpec {
     /**
      * Defines the plugin repositories to use.
      */
+    @Configuring
     void repositories(Action<? super RepositoryHandler> repositoriesAction);
 
     /**
@@ -70,7 +72,7 @@ public interface PluginManagementSpec {
      *
      * @since 7.0
      */
-    @Incubating
+    @Adding
     void includeBuild(String rootProject);
 
     /**
@@ -81,7 +83,5 @@ public interface PluginManagementSpec {
      *
      * @since 7.0
      */
-    @Incubating
     void includeBuild(String rootProject, Action<ConfigurableIncludedPluginBuild> configuration);
-
 }

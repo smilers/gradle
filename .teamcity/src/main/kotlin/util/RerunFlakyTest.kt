@@ -20,6 +20,8 @@ import common.Arch
 import common.BuildToolBuildJvm
 import common.JvmVendor
 import common.JvmVersion
+import common.KillProcessMode.KILL_LEAKED_PROCESSES_FROM_PREVIOUS_BUILDS
+import common.KillProcessMode.KILL_PROCESSES_STARTED_BY_GRADLE
 import common.Os
 import common.applyDefaultSettings
 import common.buildToolGradleParameters
@@ -29,10 +31,10 @@ import common.functionalTestExtraParameters
 import common.functionalTestParameters
 import common.gradleWrapper
 import common.killProcessStep
-import configurations.CompileAllProduction
-import jetbrains.buildServer.configs.kotlin.v2019_2.BuildStep
-import jetbrains.buildServer.configs.kotlin.v2019_2.BuildType
-import jetbrains.buildServer.configs.kotlin.v2019_2.ParameterDisplay
+import configurations.CompileAll
+import jetbrains.buildServer.configs.kotlin.BuildStep
+import jetbrains.buildServer.configs.kotlin.BuildType
+import jetbrains.buildServer.configs.kotlin.ParameterDisplay
 
 class RerunFlakyTest(os: Os, arch: Arch = Arch.AMD64) : BuildType({
     val id = "Util_RerunFlakyTest${os.asName()}${arch.asName()}"
@@ -46,25 +48,31 @@ class RerunFlakyTest(os: Os, arch: Arch = Arch.AMD64) : BuildType({
     val testTaskOptionsParameterName = "testTaskOptions"
     val daemon = true
     applyDefaultSettings(os, arch, buildJvm = BuildToolBuildJvm, timeout = 0)
-    val extraParameters = functionalTestExtraParameters("RerunFlakyTest", os, arch, "%$testJvmVersionParameter%", "%$testJvmVendorParameter%")
+
+    // Show all failed tests here, since that is what we are interested in
+    failureConditions.supportTestRetry = false
+
+    val extraParameters = functionalTestExtraParameters(listOf("RerunFlakyTest"), os, arch, "%$testJvmVersionParameter%", "%$testJvmVendorParameter%")
     val parameters = (
         buildToolGradleParameters(daemon) +
             listOf(extraParameters) +
-            functionalTestParameters(os)
+            functionalTestParameters(os, arch)
         ).joinToString(separator = " ")
 
-    killProcessStep("KILL_LEAKED_PROCESSES_FROM_PREVIOUS_BUILDS", daemon)
+    killProcessStep(KILL_LEAKED_PROCESSES_FROM_PREVIOUS_BUILDS, os, arch)
+
     (1..10).forEach { idx ->
         steps {
             gradleWrapper {
                 name = "GRADLE_RUNNER_$idx"
-                tasks = "%$testTaskParameterName% --rerun --tests %$testNameParameterName% %$testTaskOptionsParameterName%"
+                tasks = "%$testTaskParameterName% -PrerunAllTests --tests %$testNameParameterName% %$testTaskOptionsParameterName%"
                 gradleParams = parameters
                 executionMode = BuildStep.ExecutionMode.ALWAYS
             }
         }
-        killProcessStep("KILL_PROCESSES_STARTED_BY_GRADLE", daemon)
+        killProcessStep(KILL_PROCESSES_STARTED_BY_GRADLE, os, arch, BuildStep.ExecutionMode.ALWAYS)
     }
+
     steps {
         checkCleanM2AndAndroidUserHome(os)
     }
@@ -103,11 +111,11 @@ class RerunFlakyTest(os: Os, arch: Arch = Arch.AMD64) : BuildType({
             "",
             display = ParameterDisplay.PROMPT,
             allowEmpty = true,
-            description = "Additional options for the test task to run"
+            description = "Additional options for the test task to run (`-PrerunAllTests` is already added implicitly)"
         )
     }
 
     dependencies {
-        compileAllDependency(CompileAllProduction.buildTypeId("Check"))
+        compileAllDependency(CompileAll.buildTypeId("Check"))
     }
 })

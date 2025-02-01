@@ -22,30 +22,32 @@ import org.gradle.api.internal.GradleInternal;
 import org.gradle.api.internal.SettingsInternal;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
 import org.gradle.api.internal.initialization.ScriptHandlerFactory;
+import org.gradle.api.internal.initialization.StandaloneDomainObjectContext;
 import org.gradle.api.internal.properties.GradleProperties;
 import org.gradle.groovy.scripts.ScriptSource;
 import org.gradle.internal.extensibility.ExtensibleDynamicObject;
 import org.gradle.internal.metaobject.DynamicObject;
 import org.gradle.internal.reflect.Instantiator;
+import org.gradle.internal.service.CloseableServiceRegistry;
+import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.internal.service.scopes.ServiceRegistryFactory;
+import org.gradle.internal.service.scopes.SettingsScopeServices;
 
 import java.io.File;
 import java.util.Map;
 
-import static java.util.Collections.emptyMap;
-
 public class SettingsFactory {
     private final Instantiator instantiator;
-    private final ServiceRegistryFactory serviceRegistryFactory;
+    private final ServiceRegistry buildScopeServices;
     private final ScriptHandlerFactory scriptHandlerFactory;
 
-    public SettingsFactory(Instantiator instantiator, ServiceRegistryFactory serviceRegistryFactory, ScriptHandlerFactory scriptHandlerFactory) {
+    public SettingsFactory(Instantiator instantiator, ServiceRegistry buildScopeServices, ScriptHandlerFactory scriptHandlerFactory) {
         this.instantiator = instantiator;
-        this.serviceRegistryFactory = serviceRegistryFactory;
+        this.buildScopeServices = buildScopeServices;
         this.scriptHandlerFactory = scriptHandlerFactory;
     }
 
-    public SettingsInternal createSettings(
+    public SettingsState createSettings(
         GradleInternal gradle,
         File settingsDir,
         ScriptSource settingsScript,
@@ -53,21 +55,32 @@ public class SettingsFactory {
         StartParameter startParameter,
         ClassLoaderScope baseClassLoaderScope
     ) {
-        ClassLoaderScope classLoaderScope = baseClassLoaderScope.createChild("settings[" + gradle.getIdentityPath() + "]");
+        ClassLoaderScope classLoaderScope = baseClassLoaderScope.createChild("settings[" + gradle.getIdentityPath() + "]", null);
+        SettingsServiceRegistryFactory serviceRegistryFactory = new SettingsServiceRegistryFactory();
         DefaultSettings settings = instantiator.newInstance(
             DefaultSettings.class,
             serviceRegistryFactory,
             gradle,
             classLoaderScope,
             baseClassLoaderScope,
-            scriptHandlerFactory.create(settingsScript, classLoaderScope),
+            scriptHandlerFactory.create(settingsScript, classLoaderScope, StandaloneDomainObjectContext.forScript(settingsScript)),
             settingsDir,
             settingsScript,
             startParameter
         );
-        Map<String, Object> properties = gradleProperties.mergeProperties(emptyMap());
+        Map<String, Object> properties = gradleProperties.getProperties();
         DynamicObject dynamicObject = ((DynamicObjectAware) settings).getAsDynamicObject();
         ((ExtensibleDynamicObject) dynamicObject).addProperties(properties);
-        return settings;
+        return new SettingsState(settings, serviceRegistryFactory.services);
+    }
+
+    private class SettingsServiceRegistryFactory implements ServiceRegistryFactory {
+        private CloseableServiceRegistry services;
+
+        @Override
+        public ServiceRegistry createFor(Object domainObject) {
+            services = SettingsScopeServices.create(buildScopeServices, (SettingsInternal) domainObject);
+            return services;
+        }
     }
 }

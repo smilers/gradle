@@ -16,46 +16,35 @@
 
 package gradlebuild.performance.tasks
 
-import gradlebuild.basics.kotlindsl.execAndGetStdout
-import gradlebuild.identity.extension.ModuleIdentityExtension
-import io.mockk.every
-import io.mockk.mockkStatic
-import io.mockk.unmockkStatic
 import org.gradle.internal.os.OperatingSystem
+// Using star import to workaround https://youtrack.jetbrains.com/issue/KTIJ-24390
 import org.gradle.kotlin.dsl.*
 import org.gradle.testfixtures.ProjectBuilder
-import org.junit.After
 import org.junit.Assume
 import org.junit.Before
 import org.junit.Test
+import org.junit.jupiter.api.Assertions
 
 
 class DetermineBaselinesTest {
     private
     val project = ProjectBuilder.builder().build()
 
+    private
+    val defaultPerformanceBaselines = "7.5-commit-123456"
+
+    private
+    val commandExecutor: TestCommandExecutor = TestCommandExecutor()
+        .registerCommand(listOf("git", "remote", "-v"), "origin https://github.com/gradle/gradle.git (fetch)")
+
     @Before
     fun setUp() {
         project.file("version.txt").writeText("1.0")
-        project.apply(plugin = "gradlebuild.module-identity")
-
-        // mock project.execAndGetStdout
-        mockkStatic("gradlebuild.basics.kotlindsl.Kotlin_dsl_upstream_candidatesKt")
-    }
-
-    @After
-    fun cleanUp() {
-        unmockkStatic("gradlebuild.basics.kotlindsl.Kotlin_dsl_upstream_candidatesKt")
-    }
-
-    @Test
-    fun `determines defaults when configured as force-defaults`() {
-        verifyBaselineDetermination(false, forceDefaultBaseline, defaultBaseline)
     }
 
     @Test
     fun `keeps flakiness-detection-commit as it is in coordinator build`() {
-        verifyBaselineDetermination(true, flakinessDetectionCommitBaseline, flakinessDetectionCommitBaseline)
+        verifyBaselineDetermination("any", true, FLAKINESS_DETECTION_COMMIT_BASELINE, FLAKINESS_DETECTION_COMMIT_BASELINE)
     }
 
     @Test
@@ -66,15 +55,12 @@ class DetermineBaselinesTest {
         mockGitOperation(listOf("git", "rev-parse", "--short", "current"), "current")
 
         // then
-        verifyBaselineDetermination(false, flakinessDetectionCommitBaseline, "5.0-commit-current")
+        verifyBaselineDetermination("any", false, FLAKINESS_DETECTION_COMMIT_BASELINE, "5.0-commit-current")
     }
 
     @Test
     fun `determines fork point commit on feature branch and default configuration`() {
-        // Windows git complains "long path" so we don't build commit distribution on Windows
-        Assume.assumeFalse(OperatingSystem.current().isWindows)
         // given
-        setCurrentBranch("my-branch")
         mockGitOperation(listOf("git", "fetch", "origin", "master", "release"), "")
         mockGitOperation(listOf("git", "merge-base", "origin/master", "HEAD"), "master-fork-point")
         mockGitOperation(listOf("git", "merge-base", "origin/release", "HEAD"), "release-fork-point")
@@ -82,7 +68,16 @@ class DetermineBaselinesTest {
         mockGitOperation(listOf("git", "rev-parse", "--short", "master-fork-point"), "master-fork-point")
 
         // then
-        verifyBaselineDetermination(false, defaultBaseline, "5.1-commit-master-fork-point")
+        verifyBaselineDetermination("my-branch", false, null, "5.1-commit-master-fork-point")
+    }
+
+    @Test
+    fun `not determines fork point commit in security advisory fork`() {
+        // given
+        mockGitOperation(listOf("git", "remote", "-v"), "origin https://github.com/gradle/gradle-ghsa-84mw-qh6q-v842.git (fetch)")
+
+        // then
+        verifyBaselineDetermination("my-branch", false, null, defaultPerformanceBaselines)
     }
 
     @Test
@@ -90,7 +85,6 @@ class DetermineBaselinesTest {
         // Windows git complains "long path" so we don't build commit distribution on Windows
         Assume.assumeFalse(OperatingSystem.current().isWindows)
         // given
-        setCurrentBranch("my-branch")
         mockGitOperation(listOf("git", "fetch", "origin", "master", "release"), "")
         mockGitOperation(listOf("git", "merge-base", "origin/master", "HEAD"), "master-fork-point")
         mockGitOperation(listOf("git", "merge-base", "origin/release", "HEAD"), "release-fork-point")
@@ -98,50 +92,61 @@ class DetermineBaselinesTest {
         mockGitOperation(listOf("git", "rev-parse", "--short", "master-fork-point"), "master-fork-point")
 
         // then
-        verifyBaselineDetermination(false, null, "5.1-commit-master-fork-point")
+        verifyBaselineDetermination("my-branch", false, null, "5.1-commit-master-fork-point")
     }
 
     @Test
     fun `uses configured version on master branch`() {
-        // given
-        setCurrentBranch("master")
-
-        // then
-        verifyBaselineDetermination(false, defaultBaseline, defaultBaseline)
+        verifyBaselineDetermination("master", false, defaultPerformanceBaselines, defaultPerformanceBaselines)
     }
 
     @Test
     fun `uses configured version when it is overwritten on feature branch`() {
-        // given
-        setCurrentBranch("my-branch")
-
-        // then
-        verifyBaselineDetermination(false, "any", "any")
+        verifyBaselineDetermination("my-branch", false, "any", "any")
     }
 
     private
     fun createDetermineBaselinesTask(isDistributed: Boolean) =
-        project.tasks.create("determineBaselines", DetermineBaselines::class.java, isDistributed)
+        project.tasks.register("determineBaselines", DetermineBaselines::class.java, isDistributed, commandExecutor).get()
 
     private
     fun mockGitOperation(args: List<String>, expectedOutput: String) =
-        every { project.execAndGetStdout(*(args.toTypedArray())) } returns expectedOutput
+        commandExecutor.registerCommand(args, expectedOutput)
 
     private
-    fun setCurrentBranch(branch: String) {
-        project.the<ModuleIdentityExtension>().gradleBuildBranch.set(branch)
-    }
-
-    private
-    fun verifyBaselineDetermination(isCoordinatorBuild: Boolean, configuredBaseline: String?, determinedBaseline: String) {
+    fun verifyBaselineDetermination(currentBranch: String, isCoordinatorBuild: Boolean, configuredBaseline: String?, determinedBaseline: String) {
         // given
         val determineBaselinesTask = createDetermineBaselinesTask(isCoordinatorBuild)
 
         // when
-        determineBaselinesTask.configuredBaselines.set(configuredBaseline)
+        determineBaselinesTask.logicalBranch = currentBranch
+        determineBaselinesTask.configuredBaselines = configuredBaseline
+        determineBaselinesTask.defaultBaselines = defaultPerformanceBaselines
         determineBaselinesTask.determineForkPointCommitBaseline()
 
         // then
-        assert(determineBaselinesTask.determinedBaselines.get() == determinedBaseline)
+        Assertions.assertEquals(determinedBaseline, determineBaselinesTask.determinedBaselines.get())
+    }
+
+    private
+    class TestCommandExecutor : CommandExecutor {
+
+        private
+        val commands = mutableMapOf<List<String>, String>()
+
+        override fun execAndGetStdout(vararg args: String): String {
+            val argsList = args.toList()
+            if (commands[argsList] != null) {
+                return commands[argsList]!!
+            }
+
+            val knownCommands = commands.keys.joinToString("\n") { "    - " + it.joinToString(" ") }
+            error("Unexpected command: ${args.joinToString(" ")}. Known commands:\n$knownCommands")
+        }
+
+        fun registerCommand(args: List<String>, expectedOutput: String): TestCommandExecutor {
+            commands[args] = expectedOutput
+            return this
+        }
     }
 }

@@ -16,6 +16,9 @@
 package org.gradle.api.artifacts.dsl;
 
 import groovy.lang.Closure;
+import groovy.lang.DelegatesTo;
+import groovy.transform.stc.ClosureParams;
+import groovy.transform.stc.SimpleType;
 import org.gradle.api.Action;
 import org.gradle.api.artifacts.ArtifactRepositoryContainer;
 import org.gradle.api.artifacts.repositories.ArtifactRepository;
@@ -23,6 +26,7 @@ import org.gradle.api.artifacts.repositories.ExclusiveContentRepository;
 import org.gradle.api.artifacts.repositories.FlatDirectoryArtifactRepository;
 import org.gradle.api.artifacts.repositories.IvyArtifactRepository;
 import org.gradle.api.artifacts.repositories.MavenArtifactRepository;
+import org.gradle.declarative.dsl.model.annotations.Adding;
 import org.gradle.internal.HasInternalProtocol;
 
 import java.util.Map;
@@ -41,7 +45,8 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      *
      * The following parameter are accepted as keys for the map:
      *
-     * <table summary="Shows property keys and associated values">
+     * <table>
+     * <caption>Shows property keys and associated values</caption>
      * <tr><th>Key</th>
      *     <th>Description of Associated Value</th></tr>
      * <tr><td><code>name</code></td>
@@ -68,15 +73,15 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
     FlatDirectoryArtifactRepository flatDir(Map<String, ?> args);
 
     /**
-     * Adds an configures a repository which will look for dependencies in a number of local directories.
+     * Adds and configures a repository which will look for dependencies in a number of local directories.
      *
      * @param configureClosure The closure to execute to configure the repository.
      * @return The repository.
      */
-    FlatDirectoryArtifactRepository flatDir(Closure configureClosure);
+    FlatDirectoryArtifactRepository flatDir(@DelegatesTo(FlatDirectoryArtifactRepository.class) Closure configureClosure);
 
     /**
-     * Adds an configures a repository which will look for dependencies in a number of local directories.
+     * Adds and configures a repository which will look for dependencies in a number of local directories.
      *
      * @param action The action to execute to configure the repository.
      * @return The repository.
@@ -89,6 +94,7 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      * @return The Gradle Central Plugin Repository
      * @since 4.4
      */
+    @Adding
     ArtifactRepository gradlePluginPortal();
 
     /**
@@ -152,7 +158,8 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      *
      * <p>The following parameter are accepted as keys for the map:
      *
-     * <table summary="Shows property keys and associated values">
+     * <table>
+     * <caption>Shows property keys and associated values</caption>
      * <tr><th>Key</th>
      *     <th>Description of Associated Value</th></tr>
      * <tr><td><code>name</code></td>
@@ -194,6 +201,7 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      * @return the added resolver
      * @see #mavenCentral(java.util.Map)
      */
+    @Adding
     MavenArtifactRepository mavenCentral();
 
     /**
@@ -279,6 +287,7 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      * @return the added resolver
      * @since 4.0
      */
+    @Adding
     MavenArtifactRepository google();
 
     /**
@@ -305,7 +314,9 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      * @param closure The closure to use to configure the repository.
      * @return The added repository.
      */
-    MavenArtifactRepository maven(Closure closure);
+    MavenArtifactRepository maven(@DelegatesTo(MavenArtifactRepository.class)
+                                  @ClosureParams(value = SimpleType.class, options = "org.gradle.api.artifacts.repositories.MavenArtifactRepository")
+                                  Closure closure);
 
     /**
      * Adds and configures a Maven repository.
@@ -313,6 +324,7 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      * @param action The action to use to configure the repository.
      * @return The added repository.
      */
+    @Adding
     MavenArtifactRepository maven(Action<? super MavenArtifactRepository> action);
 
     /**
@@ -321,7 +333,7 @@ public interface RepositoryHandler extends ArtifactRepositoryContainer {
      * @param closure The closure to use to configure the repository.
      * @return The added repository.
      */
-    IvyArtifactRepository ivy(Closure closure);
+    IvyArtifactRepository ivy(@DelegatesTo(IvyArtifactRepository.class) Closure closure);
 
     /**
      * Adds and configures an Ivy repository.

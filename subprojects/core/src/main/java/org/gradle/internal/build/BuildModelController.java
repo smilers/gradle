@@ -18,13 +18,19 @@ package org.gradle.internal.build;
 
 import org.gradle.api.internal.GradleInternal;
 import org.gradle.api.internal.SettingsInternal;
+import org.gradle.execution.EntryTaskSelector;
 import org.gradle.execution.plan.ExecutionPlan;
 import org.gradle.internal.buildtree.BuildTreeLifecycleController;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
+
+import javax.annotation.Nullable;
 
 /**
  * Transitions the model of an individual build in the build tree through its lifecycle.
  * See also {@link BuildTreeLifecycleController} and {@link BuildLifecycleController}.
  */
+@ServiceScope(Scope.Build.class)
 public interface BuildModelController {
     /**
      * Ensures the build's settings object has been configured.
@@ -46,12 +52,7 @@ public interface BuildModelController {
     void prepareToScheduleTasks();
 
     /**
-     * Sets up the given execution plan before any work is added to it. Must call {@link #prepareToScheduleTasks()} prior to calling this method.
+     * Schedules the user requested tasks for this build into the given plan.
      */
-    void initializeWorkGraph(ExecutionPlan plan);
-
-    /**
-     * Schedules the user requested tasks for this build into the given plan. Must call {@link  #initializeWorkGraph(ExecutionPlan)} prior to calling this method.
-     */
-    void scheduleRequestedTasks(ExecutionPlan plan);
+    void scheduleRequestedTasks(@Nullable EntryTaskSelector selector, ExecutionPlan plan);
 }

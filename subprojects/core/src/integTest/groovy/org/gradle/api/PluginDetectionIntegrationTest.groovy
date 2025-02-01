@@ -48,7 +48,14 @@ class PluginDetectionIntegrationTest extends AbstractIntegrationSpec {
             assert pluginManager.hasPlugin("$detectedBy")
             assert pluginManager.findPlugin("$detectedBy").id == "$detectedBy"
 
-            task verify { doLast { assert operations == ['applying', 'withId for JavaPlugin', 'withPlugin', 'applied'] } }
+            task verify {
+                doLast {
+                    assert operations[0] == 'applying'
+                    assert operations[1] =~ /withId for JavaPlugin_Decorated[\\d]*/
+                    assert operations[2] == 'withPlugin'
+                    assert operations[3] == 'applied'
+                }
+            }
         """
 
         expect:
@@ -207,7 +214,7 @@ class PluginDetectionIntegrationTest extends AbstractIntegrationSpec {
         """
         file("buildSrc/src/main/resources/META-INF/gradle-plugins/c.properties") << "implementation-class=PluginC"
 
-        buildScript """
+        buildFile """
             class ExamplePlugin implements Plugin<Project> {
                 void apply(final Project project) {
                     project.plugins.withId('a') {

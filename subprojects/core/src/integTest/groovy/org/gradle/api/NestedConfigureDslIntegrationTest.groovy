@@ -23,6 +23,7 @@ import org.gradle.api.internal.tasks.DefaultTaskContainer
 import org.gradle.api.tasks.TaskContainer
 import org.gradle.configuration.Help
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
 
 import static org.gradle.integtests.fixtures.RepoScriptBlockUtil.mavenCentralRepositoryDefinition
 
@@ -211,8 +212,7 @@ assert repositories.empty
         succeeds()
     }
 
-    // NOTE: Documents actual behaviour, for backwards compatibility purposes, not desired behaviour
-    def "can reference script level configure method from named container configure closure when that closure would fail with MME if applied to a new element"() {
+    def "cannot reference script level configure method from named container configure closure when that closure would fail with MME if applied to a new element"() {
         buildFile << """
 configurations {
     ${mavenCentralRepository()}
@@ -225,7 +225,42 @@ assert repositories.size() == 1
 """
 
         expect:
-        succeeds()
+        fails "help"
+        errorOutput.contains("Could not find method maven() for arguments")
+    }
+
+    @ToBeFixedForConfigurationCache(because = "resolves configuration at execution time through configuration container")
+    def "cannot reference script level configure method from async closure in named container configure closure when that closure would fail with MME if applied to a new element"() {
+        buildFile << """
+plugins {
+    id 'distribution'
+}
+${mavenCentralRepository()}
+
+configurations {
+    conf.incoming.afterResolve {
+        distributions {
+            myDist {
+                contents {}
+            }
+        }
+    }
+}
+
+task resolve {
+    dependsOn configurations.conf
+    doFirst {
+        configurations.conf.files // Trigger `afterResolve`
+        assert distributions*.name.contains('myDist')
+    }
+}
+
+assert configurations*.name.contains('conf')
+"""
+
+        expect:
+        fails "resolve"
+        errorOutput.contains("Could not find method myDist() for arguments")
     }
 
     def "reports missing method from inside configure closure"() {
@@ -239,7 +274,7 @@ configurations {
 
         expect:
         fails()
-        failure.assertHasCause("Could not find method noExist() for arguments [12] on configuration ':broken' of type org.gradle.api.internal.artifacts.configurations.DefaultConfiguration.")
+        failure.assertHasCause("Could not find method noExist() for arguments [12] on configuration ':broken' of type org.gradle.api.internal.artifacts.configurations.DefaultUnlockedConfiguration.")
     }
 
     def "reports set unknown property from polymorphic container configure closure"() {

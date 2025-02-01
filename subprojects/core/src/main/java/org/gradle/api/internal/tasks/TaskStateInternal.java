@@ -29,7 +29,10 @@ public class TaskStateInternal implements TaskState {
     private boolean actionable = true;
     private boolean didWork;
     private RuntimeException failure;
-    private TaskExecutionOutcome outcome;
+    private volatile TaskExecutionOutcome outcome;
+
+    @Nullable
+    private String skipReasonMessage;
 
     @Override
     public boolean getDidWork() {
@@ -57,6 +60,27 @@ public class TaskStateInternal implements TaskState {
     public void setOutcome(TaskExecutionOutcome outcome) {
         assert this.outcome == null;
         this.outcome = outcome;
+    }
+
+    /**
+     * The detailed reason why the task was skipped, if provided.
+     *
+     * @return the reason. returns null if the task was not skipped or if the reason was not provided.
+     * @see org.gradle.api.Task#onlyIf(String, org.gradle.api.specs.Spec)
+     * @since 7.6
+     */
+    @Nullable
+    public String getSkipReasonMessage() {
+        return skipReasonMessage;
+    }
+
+    /**
+     * Sets the detailed reason why the task was skipped.
+     *
+     * @see TaskStateInternal#getSkipReasonMessage()
+     */
+    public void setSkipReasonMessage(@Nullable String skipReasonMessage) {
+        this.skipReasonMessage = skipReasonMessage;
     }
 
     /**

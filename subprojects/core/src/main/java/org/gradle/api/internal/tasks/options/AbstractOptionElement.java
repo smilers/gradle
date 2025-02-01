@@ -34,7 +34,7 @@ abstract class AbstractOptionElement implements OptionElement {
         this(readDescription(option, optionName, declaringClass), optionName, optionType);
     }
 
-    private AbstractOptionElement(String description, String optionName, Class<?> optionType) {
+    protected AbstractOptionElement(String description, String optionName, Class<?> optionType) {
         this.description = description;
         this.optionName = optionName;
         this.optionType = optionType;
@@ -85,15 +85,6 @@ abstract class AbstractOptionElement implements OptionElement {
         } catch (OptionValidationException ex) {
             throw new OptionValidationException(String.format("Option '%s' cannot be cast to type '%s' in class '%s'.",
                     optionName, optionType.getName(), declaringClass.getName()));
-        }
-    }
-
-    protected static Class<?> calculateOptionType(Class<?> type) {
-        //we don't want to support "--flag true" syntax
-        if (type == Boolean.class || type == Boolean.TYPE) {
-            return Void.TYPE;
-        } else {
-            return type;
         }
     }
 }

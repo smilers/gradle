@@ -16,62 +16,57 @@
 
 package org.gradle.api.internal.attributes;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import org.gradle.api.attributes.Attribute;
 import org.gradle.api.attributes.AttributeContainer;
 import org.gradle.api.internal.provider.ProviderInternal;
 import org.gradle.api.provider.Provider;
 import org.gradle.internal.Cast;
+import org.gradle.internal.deprecation.DeprecationLogger;
+import org.gradle.internal.isolation.Isolatable;
 
 import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 
-class DefaultMutableAttributeContainer implements AttributeContainerInternal {
-    private final ImmutableAttributesFactory immutableAttributesFactory;
-    private final AttributeContainerInternal parent;
-    private ImmutableAttributes state = ImmutableAttributes.EMPTY;
+final class DefaultMutableAttributeContainer extends AbstractAttributeContainer implements AttributeContainerInternal {
+    private final Map<Attribute<?>, Isolatable<?>> attributes = new LinkedHashMap<>(); // Need to maintain insertion order here, this is indirectly tested
     private Map<Attribute<?>, Provider<?>> lazyAttributes = Cast.uncheckedCast(Collections.EMPTY_MAP);
+    private boolean realizingAttributes = false;
 
-    public DefaultMutableAttributeContainer(ImmutableAttributesFactory immutableAttributesFactory) {
-        this(immutableAttributesFactory, null);
-    }
+    private final AttributesFactory attributesFactory;
+    private final AttributeValueIsolator attributeValueIsolator;
 
-    public DefaultMutableAttributeContainer(ImmutableAttributesFactory immutableAttributesFactory, @Nullable AttributeContainerInternal parent) {
-        this.immutableAttributesFactory = immutableAttributesFactory;
-        this.parent = parent;
+    private ImmutableAttributes immutableValue;
+
+    public DefaultMutableAttributeContainer(AttributesFactory attributesFactory, AttributeValueIsolator attributeValueIsolator) {
+        this.attributesFactory = attributesFactory;
+        this.attributeValueIsolator = attributeValueIsolator;
     }
 
     @Override
     public String toString() {
+        maybeEmitRecursiveQueryDeprecation();
         final Map<Attribute<?>, Object> sorted = new TreeMap<>(Comparator.comparing(Attribute::getName));
-
-        state.keySet().forEach(key -> sorted.put(key, state.getAttribute(key)));
-        if (null != parent) {
-            parent.keySet().forEach(key -> sorted.put(key, parent.getAttribute(key)));
-        }
         lazyAttributes.keySet().forEach(key -> sorted.put(key, lazyAttributes.get(key).toString()));
-
+        attributes.keySet().forEach(key -> sorted.put(key, attributes.get(key).toString()));
         return sorted.toString();
     }
 
     @Override
     public Set<Attribute<?>> keySet() {
-        if (parent == null) {
-            return nonParentKeys();
-        } else {
-            return Sets.union(parent.keySet(), nonParentKeys());
-        }
-    }
-
-    private Set<Attribute<?>> nonParentKeys() {
-        return Sets.union(state.keySet(), lazyAttributes.keySet());
+        maybeEmitRecursiveQueryDeprecation();
+        // Need to copy the result since if the user calls getAttribute() while iterating over the returned set,
+        // realizing a lazy attribute will add to the eager `attributes` map and remove from the `lazyAttributes`.
+        // This avoids a ConcurrentModificationException.
+        return ImmutableSet.copyOf(Sets.union(attributes.keySet(), lazyAttributes.keySet()));
     }
 
     @Override
@@ -84,14 +79,13 @@ class DefaultMutableAttributeContainer implements AttributeContainerInternal {
     private <T> void doInsertion(Attribute<T> key, T value) {
         assertAttributeValueIsNotNull(value);
         assertAttributeTypeIsValid(value.getClass(), key);
-        state = immutableAttributesFactory.concat(state, key, value);
+        immutableValue = null;
+        attributes.put(key, attributeValueIsolator.isolate(value));
         removeLazyAttributeIfPresent(key);
     }
 
     private <T> void removeLazyAttributeIfPresent(Attribute<T> key) {
-        if (lazyAttributes.containsKey(key)) {
-            lazyAttributes.remove(key);
-        }
+        lazyAttributes.remove(key);
     }
 
     @Override
@@ -112,8 +106,10 @@ class DefaultMutableAttributeContainer implements AttributeContainerInternal {
     }
 
     private <T> void checkInsertionAllowed(Attribute<T> key) {
-        // Don't just use keySet() method instead, since we should be allowed to override attributes already in the parent
-        for (Attribute<?> attribute : nonParentKeys()) {
+        if (realizingAttributes) {
+            throw new IllegalStateException("Cannot add new attribute '" + key.getName() + "' while realizing all attributes of the container.");
+        }
+        for (Attribute<?> attribute : keySet()) {
             String name = key.getName();
             if (attribute.getName().equals(name) && attribute.getType() != key.getType()) {
                 throw new IllegalArgumentException("Cannot have two attributes with the same name but different types. "
@@ -143,49 +139,36 @@ class DefaultMutableAttributeContainer implements AttributeContainerInternal {
 
     @Override
     public <T> T getAttribute(Attribute<T> key) {
-        T attribute = state.getAttribute(key);
-        if (attribute == null && lazyAttributes.containsKey(key)) {
-            attribute = realizeLazyAttribute(key);
+        maybeEmitRecursiveQueryDeprecation();
+        Isolatable<?> value = attributes.get(key);
+        if (value == null) {
+            if (lazyAttributes.containsKey(key)) {
+                return realizeLazyAttribute(key);
+            } else {
+                return null;
+            }
+        } else {
+            return Cast.uncheckedCast(value.isolate());
         }
-        if (attribute == null && parent != null) {
-            attribute = parent.getAttribute(key);
-        }
-        return attribute;
-    }
-
-    @Override
-    public boolean isEmpty() {
-        return keySet().isEmpty();
-    }
-
-    @Override
-    public boolean contains(Attribute<?> key) {
-        return keySet().contains(key);
     }
 
     @Override
     public ImmutableAttributes asImmutable() {
+        maybeEmitRecursiveQueryDeprecation();
         realizeAllLazyAttributes();
-
-        if (parent == null) {
-            return state;
-        } else {
-            ImmutableAttributes attributes = parent.asImmutable();
-            if (!state.isEmpty()) {
-                attributes = immutableAttributesFactory.concat(attributes, state);
-            }
-            return attributes;
+        if (immutableValue == null) {
+            immutableValue = attributesFactory.fromMap(attributes);
         }
+        return immutableValue;
     }
 
-    @Override
-    public Map<Attribute<?>, ?> asMap() {
-        return asImmutable().asMap();
-    }
-
-    @Override
-    public AttributeContainer getAttributes() {
-        return this;
+    private void maybeEmitRecursiveQueryDeprecation() {
+        if (realizingAttributes) {
+            DeprecationLogger.deprecateBehaviour("Querying the contents of an attribute container while realizing attributes of the container.")
+                .willBecomeAnErrorInGradle9()
+                .withUpgradeGuideSection(8, "attribute_container_recursive_query")
+                .nagUser();
+        }
     }
 
     @Override
@@ -199,22 +182,12 @@ class DefaultMutableAttributeContainer implements AttributeContainerInternal {
 
         DefaultMutableAttributeContainer that = (DefaultMutableAttributeContainer) o;
 
-        if (!Objects.equals(parent, that.parent)) {
-            return false;
-        }
-        if (!Objects.equals(asImmutable(), that.asImmutable())) {
-            return false;
-        }
-
-        return state.equals(that.state);
+        return Objects.equals(asImmutable(), that.asImmutable());
     }
 
     @Override
     public int hashCode() {
-        int result = parent != null ? parent.hashCode() : 0;
-        result = 31 * result + state.hashCode();
-        result = 31 * result + asImmutable().hashCode();
-        return result;
+        return asImmutable().hashCode();
     }
 
     private <T> void doInsertionLazy(Attribute<T> key, Provider<? extends T> provider) {
@@ -226,16 +199,8 @@ class DefaultMutableAttributeContainer implements AttributeContainerInternal {
     }
 
     private <T> void removeAttributeIfPresent(Attribute<T> key) {
-        if (state.contains(key)) {
-            DefaultMutableAttributeContainer newState = new DefaultMutableAttributeContainer(immutableAttributesFactory, parent);
-            state.keySet().stream()
-                    .filter(k -> !k.equals(key))
-                    .forEach(k -> {
-                        @SuppressWarnings("unchecked") Attribute<Object> objectKey = (Attribute<Object>) k;
-                        newState.attribute(objectKey, Objects.requireNonNull(state.getAttribute(k)));
-                    });
-            state = newState.asImmutable();
-        }
+        immutableValue = null;
+        attributes.remove(key);
     }
 
     private <T> T realizeLazyAttribute(Attribute<T> key) {
@@ -247,8 +212,23 @@ class DefaultMutableAttributeContainer implements AttributeContainerInternal {
     private void realizeAllLazyAttributes() {
         if (!lazyAttributes.isEmpty()) {
             // As doInsertion will remove an item from lazyAttributes, we can't iterate that collection directly here, or else we'll get ConcurrentModificationException
-            final Set<Attribute<?>> savedKeys = new HashSet<>(lazyAttributes.keySet());
-            savedKeys.forEach(key -> doInsertion(Cast.uncheckedNonnullCast(key), lazyAttributes.get(key).get()));
+            final Set<Attribute<?>> savedKeys = new LinkedHashSet<>(lazyAttributes.keySet());
+            try {
+                realizingAttributes = true;
+                savedKeys.forEach(key -> {
+                    Provider<?> value = lazyAttributes.get(key);
+                    // Between getting the list of keys and realizing the values
+                    // some lazy attributes have been realized and removed from the map
+                    // This can happen when a side effect of calculating the value of a Provider
+                    // causes dependency resolution or evaluation of the attributes of
+                    // the same AttributeContainer
+                    if (value != null) {
+                        doInsertion(Cast.uncheckedNonnullCast(key), value.get());
+                    }
+                });
+            } finally {
+                realizingAttributes = false;
+            }
         }
     }
 }

@@ -63,6 +63,18 @@ public interface ProjectState extends ModelContainer<ProjectInternal> {
     Set<ProjectState> getChildProjects();
 
     /**
+     * Returns the direct children of this project in no particular order.
+     */
+    Iterable<ProjectState> getUnorderedChildProjects();
+
+    /**
+     * Checks whether this project has child projects.
+     *
+     * @return true when this project has child projects.
+     */
+    boolean hasChildren();
+
+    /**
      * Returns the name of this project (which may not necessarily be unique).
      */
     String getName();
@@ -73,7 +85,12 @@ public interface ProjectState extends ModelContainer<ProjectInternal> {
     Path getIdentityPath();
 
     /**
-     * Returns a path for this project within its containing build. These are not unique within a build tree.
+     * Gets the identity of this project, containing the identity within the build tree and the owning build.
+     */
+    ProjectIdentity getIdentity();
+
+    /**
+     * Returns a path for this project within its containing build. These are not unique within a build tree. Use instead {@link #getIdentityPath()} to uniquely this project.
      */
     Path getProjectPath();
 
@@ -83,9 +100,20 @@ public interface ProjectState extends ModelContainer<ProjectInternal> {
     File getProjectDir();
 
     /**
+     * Returns the nesting level of a project in a multi-project hierarchy. For single project builds this is always
+     * 0. In a multi-project hierarchy 0 is returned for the root project.
+     */
+    int getDepth();
+
+    /**
      * Returns the identifier of the default component produced by this project.
      */
     ProjectComponentIdentifier getComponentIdentifier();
+
+    /**
+     * Is the mutable model for this project available?
+     */
+    boolean isCreated();
 
     /**
      * Creates the mutable model for this project.
@@ -98,6 +126,13 @@ public interface ProjectState extends ModelContainer<ProjectInternal> {
      * May also configure the parent of this project.
      */
     void ensureConfigured();
+
+    /**
+     * Configures the mutable model for this project, if not already.
+     *
+     * @throws IllegalStateException when the parent of this model is not already configured.
+     */
+    void ensureSelfConfigured();
 
     /**
      * Configure the mutable model for this project and discovers any registered tasks, if not already done.

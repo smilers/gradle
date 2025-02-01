@@ -22,19 +22,25 @@ import javassist.CtClass
 import me.champeau.gradle.japicmp.report.Violation
 
 class MethodsRemovedInInternalSuperClassRuleTest extends AbstractContextAwareRuleSpecification {
-    MethodsRemovedInInternalSuperClassRule rule = new MethodsRemovedInInternalSuperClassRule(getInitializationParams())
+    MethodsRemovedInInternalSuperClassRule rule
 
     static class OldSuperInternal {
         void publicMethod() {}
 
         private void privateMethod() {}
+
+        OldSuperInternal returnTypeOverridenMethod() { return null }
     }
 
     static class OldBase extends OldSuperInternal {
         void anotherPublicMethod() {}
+
+        OldBase returnTypeOverridenMethod() { return null }
     }
 
-    static class OldSub extends OldBase {}
+    static class OldSub extends OldBase {
+        OldSub returnTypeOverridenMethod() { return null }
+    }
 
     static class NewSuperInternal {}
 
@@ -45,6 +51,7 @@ class MethodsRemovedInInternalSuperClassRuleTest extends AbstractContextAwareRul
     Map classes = [:]
 
     def setup() {
+        rule = new MethodsRemovedInInternalSuperClassRule(getInitializationParams())
         rule.context = context
         [OldSuperInternal, NewSuperInternal].each {
             CtClass c = instanceScopedPool.get(it.name)
@@ -73,6 +80,7 @@ class MethodsRemovedInInternalSuperClassRuleTest extends AbstractContextAwareRul
 
         then:
         violation.humanExplanation.contains('SuperInternal.publicMethod()')
+        violation.humanExplanation.contains('SuperInternal.returnTypeOverridenMethod()')
         !violation.humanExplanation.contains('SuperInternal.privateMethod()')
     }
 

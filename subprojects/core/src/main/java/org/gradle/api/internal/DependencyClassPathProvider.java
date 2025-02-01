@@ -26,20 +26,21 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 
-import static org.gradle.api.internal.artifacts.dsl.dependencies.DependencyFactory.ClassPathNotation.GRADLE_API;
-import static org.gradle.api.internal.artifacts.dsl.dependencies.DependencyFactory.ClassPathNotation.GRADLE_KOTLIN_DSL;
-import static org.gradle.api.internal.artifacts.dsl.dependencies.DependencyFactory.ClassPathNotation.GRADLE_TEST_KIT;
-import static org.gradle.api.internal.artifacts.dsl.dependencies.DependencyFactory.ClassPathNotation.LOCAL_GROOVY;
+import static org.gradle.api.internal.artifacts.dsl.dependencies.DependencyFactoryInternal.ClassPathNotation.GRADLE_API;
+import static org.gradle.api.internal.artifacts.dsl.dependencies.DependencyFactoryInternal.ClassPathNotation.GRADLE_KOTLIN_DSL;
+import static org.gradle.api.internal.artifacts.dsl.dependencies.DependencyFactoryInternal.ClassPathNotation.GRADLE_TEST_KIT;
+import static org.gradle.api.internal.artifacts.dsl.dependencies.DependencyFactoryInternal.ClassPathNotation.LOCAL_GROOVY;
 
 public class DependencyClassPathProvider implements ClassPathProvider {
     private static final List<String> MODULES = Arrays.asList(
-        "gradle-worker-processes",
+        "gradle-worker-main",
         "gradle-launcher",
         "gradle-workers",
         "gradle-dependency-management",
         "gradle-plugin-use",
-        "gradle-tooling-api",
-        "gradle-configuration-cache"
+        "gradle-tooling-api-builders",
+        "gradle-configuration-cache",
+        "gradle-unit-test-fixtures"
     );
 
     private final ModuleRegistry moduleRegistry;
@@ -78,8 +79,9 @@ public class DependencyClassPathProvider implements ClassPathProvider {
 
     private ClassPath initGradleApi() {
         // This gradleApi() method creates a Gradle API classpath based on real jars for embedded test running.
-        // Currently this leaks additional dependencies that may cause unexpected issues.
-        // This method is NOT involved in generating the gradleApi() Jar which is used in a real Gradle run.
+        // Currently, this leaks additional dependencies that may cause unexpected issues.
+        // This method is involved in generating the gradleApi() Jar which is used in a real Gradle run.
+        // See: `org.gradle.api.internal.notations.DependencyClassPathNotationConverter`
         ClassPath classpath = ClassPath.EMPTY;
         for (String moduleName : MODULES) {
             classpath = classpath.plus(moduleRegistry.getModule(moduleName).getAllRequiredModulesClasspath());

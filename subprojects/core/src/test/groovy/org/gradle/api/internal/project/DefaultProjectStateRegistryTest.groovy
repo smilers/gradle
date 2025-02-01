@@ -25,10 +25,10 @@ import org.gradle.api.internal.initialization.ClassLoaderScope
 import org.gradle.initialization.DefaultProjectDescriptor
 import org.gradle.initialization.DefaultProjectDescriptorRegistry
 import org.gradle.internal.build.BuildState
-import org.gradle.internal.concurrent.DefaultParallelismConfiguration
 import org.gradle.internal.resources.DefaultResourceLockCoordinationService
 import org.gradle.internal.service.DefaultServiceRegistry
 import org.gradle.internal.work.DefaultWorkerLeaseService
+import org.gradle.internal.work.DefaultWorkerLimits
 import org.gradle.test.fixtures.concurrent.ConcurrentSpec
 import org.gradle.util.Path
 import org.gradle.util.TestUtil
@@ -36,9 +36,13 @@ import org.gradle.util.TestUtil
 import static org.junit.Assert.assertTrue
 
 class DefaultProjectStateRegistryTest extends ConcurrentSpec {
-    def workerLeaseService = new DefaultWorkerLeaseService(new DefaultResourceLockCoordinationService(), new DefaultParallelismConfiguration(true, 4))
+    def workerLeaseService = new DefaultWorkerLeaseService(new DefaultResourceLockCoordinationService(), new DefaultWorkerLimits(4))
     def registry = new DefaultProjectStateRegistry(workerLeaseService)
     def projectFactory = Mock(IProjectFactory)
+
+    def setup() {
+        workerLeaseService.startProjectExecution(true)
+    }
 
     def "adds projects for a build"() {
         given:
@@ -53,24 +57,27 @@ class DefaultProjectStateRegistryTest extends ConcurrentSpec {
         root.identityPath == Path.ROOT
         root.projectPath == Path.ROOT
         root.componentIdentifier.projectPath == ":"
+        root.componentIdentifier.buildTreePath == ":"
         root.parent == null
 
         def p1 = registry.stateFor(projectId("p1"))
         p1.name == "p1"
-        p1.displayName.displayName == "project :p1"
+        p1.displayName.displayName == "project ':p1'"
         p1.identityPath == Path.path(":p1")
         p1.projectPath == Path.path(":p1")
         p1.parent.is(root)
         p1.componentIdentifier.projectPath == ":p1"
+        p1.componentIdentifier.buildTreePath == ":p1"
         p1.childProjects.empty
 
         def p2 = registry.stateFor(projectId("p2"))
         p2.name == "p2"
-        p2.displayName.displayName == "project :p2"
+        p2.displayName.displayName == "project ':p2'"
         p2.identityPath == Path.path(":p2")
         p2.projectPath == Path.path(":p2")
         p2.parent.is(root)
         p2.componentIdentifier.projectPath == ":p2"
+        p2.componentIdentifier.buildTreePath == ":p2"
         p2.childProjects.empty
 
         root.childProjects.toList() == [p1, p2]
@@ -95,14 +102,14 @@ class DefaultProjectStateRegistryTest extends ConcurrentSpec {
         def rootProject = project(":")
         def rootState = registry.stateFor(projectId(":"))
 
-        1 * projectFactory.createProject(_, _, rootState, _, _, _) >> rootProject
+        1 * projectFactory.createProject(_, _, rootState, _, _, _, _) >> rootProject
 
         rootState.createMutableModel(Stub(ClassLoaderScope), Stub(ClassLoaderScope))
 
         def project = project("p1")
         def state = registry.stateFor(projectId("p1"))
 
-        1 * projectFactory.createProject(_, _, state, _, _, _) >> project
+        1 * projectFactory.createProject(_, _, state, _, _, _, _) >> project
 
         state.createMutableModel(Stub(ClassLoaderScope), Stub(ClassLoaderScope))
 
@@ -122,7 +129,7 @@ class DefaultProjectStateRegistryTest extends ConcurrentSpec {
 
         then:
         def e = thrown(IllegalStateException)
-        e.message == 'Project :p1 should be in state Created or later.'
+        e.message == "Project ':p1' should be in state Created or later."
     }
 
     def "one thread can access state at a time"() {
@@ -692,13 +699,13 @@ class DefaultProjectStateRegistryTest extends ConcurrentSpec {
         def rootProject = project(':')
         def rootState = registry.stateFor(projectId(':'))
 
-        1 * projectFactory.createProject(_, _, rootState, _, _, _) >> rootProject
+        1 * projectFactory.createProject(_, _, rootState, _, _, _, _) >> rootProject
 
         rootState.createMutableModel(Stub(ClassLoaderScope), Stub(ClassLoaderScope))
     }
 
     void createProject(ProjectState state, ProjectInternal project) {
-        1 * projectFactory.createProject(_, _, state, _, _, _) >> project
+        1 * projectFactory.createProject(_, _, state, _, _, _, _) >> project
 
         state.createMutableModel(Stub(ClassLoaderScope), Stub(ClassLoaderScope))
     }
@@ -718,9 +725,8 @@ class DefaultProjectStateRegistryTest extends ConcurrentSpec {
     BuildState build(String... projects) {
         def descriptors = new DefaultProjectDescriptorRegistry()
         def root = new DefaultProjectDescriptor(null, "root", null, descriptors, null)
-        descriptors.addProject(root)
         projects.each {
-            descriptors.addProject(new DefaultProjectDescriptor(root, it, null, descriptors, null))
+            new DefaultProjectDescriptor(root, it, null, descriptors, null)
         }
 
         def settings = Stub(SettingsInternal)

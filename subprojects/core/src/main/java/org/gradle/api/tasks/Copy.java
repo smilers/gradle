@@ -21,6 +21,8 @@ import org.gradle.api.internal.file.copy.CopyAction;
 import org.gradle.api.internal.file.copy.CopySpecInternal;
 import org.gradle.api.internal.file.copy.DestinationRootCopySpec;
 import org.gradle.api.internal.file.copy.FileCopyAction;
+import org.gradle.internal.instrumentation.api.annotations.NotToBeReplacedByLazyProperty;
+import org.gradle.internal.instrumentation.api.annotations.ToBeReplacedByLazyProperty;
 import org.gradle.work.DisableCachingByDefault;
 
 import java.io.File;
@@ -67,7 +69,7 @@ import java.io.File;
  * </pre>
  */
 @DisableCachingByDefault(because = "Not worth caching")
-public class Copy extends AbstractCopyTask {
+public abstract class Copy extends AbstractCopyTask {
 
     @Override
     protected CopyAction createCopyAction() {
@@ -84,6 +86,7 @@ public class Copy extends AbstractCopyTask {
     }
 
     @Override
+    @NotToBeReplacedByLazyProperty(because = "Read-only nested like property")
     public DestinationRootCopySpec getRootSpec() {
         return (DestinationRootCopySpec) super.getRootSpec();
     }
@@ -94,6 +97,7 @@ public class Copy extends AbstractCopyTask {
      * @return The destination dir.
      */
     @OutputDirectory
+    @ToBeReplacedByLazyProperty
     public File getDestinationDir() {
         return getRootSpec().getDestinationDir();
     }

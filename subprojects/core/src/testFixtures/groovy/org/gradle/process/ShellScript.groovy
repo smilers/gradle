@@ -72,12 +72,12 @@ abstract class ShellScript {
 
         @Override
         List<String> getCommandLine() {
-            return ["cmd", "/c", scriptFile.absolutePath]
+            return ["cmd.exe", "/d", "/c", scriptFile.absolutePath]
         }
 
         @Override
         List<String> getRelativeCommandLine(File baseDir) {
-            return ["cmd", "/c", getRelativePath(baseDir)]
+            return ["cmd.exe", "/d", "/c", getRelativePath(baseDir)]
         }
     }
 
@@ -178,7 +178,7 @@ abstract class ShellScript {
 
         @Override
         Builder printText(String text) {
-            return addLine("echo \"$text\"")
+            return addLine("echo $text")
         }
 
         @Override

@@ -18,16 +18,26 @@ package org.gradle.util;
 
 import com.google.common.base.Objects;
 import com.google.common.collect.Ordering;
+import org.gradle.internal.deprecation.DeprecationLogger;
 
 import javax.annotation.Nullable;
+import java.util.Locale;
 
 /**
  * This class is only here to maintain binary compatibility with existing plugins.
  *
- * @deprecated Will be removed in Gradle 8.0.
+ * @deprecated Will be removed in Gradle 9.0.
  */
 @Deprecated
 public class VersionNumber implements Comparable<VersionNumber> {
+
+    private static void logDeprecation(int majorVersion) {
+        DeprecationLogger.deprecateType(VersionNumber.class)
+            .willBeRemovedInGradle9()
+            .withUpgradeGuideSection(majorVersion, "org_gradle_util_reports_deprecations")
+            .nagUser();
+    }
+
     private static final DefaultScheme DEFAULT_SCHEME = new DefaultScheme();
     private static final SchemeWithPatchVersion PATCH_SCHEME = new SchemeWithPatchVersion();
     public static final VersionNumber UNKNOWN = version(0);
@@ -38,51 +48,69 @@ public class VersionNumber implements Comparable<VersionNumber> {
     private final int patch;
     private final String qualifier;
     private final AbstractScheme scheme;
+    private boolean deprecationLogged;
 
     public VersionNumber(int major, int minor, int micro, @Nullable String qualifier) {
-        this(major, minor, micro, 0, qualifier, DEFAULT_SCHEME);
+        this(major, minor, micro, 0, qualifier, DEFAULT_SCHEME, true);
     }
 
     public VersionNumber(int major, int minor, int micro, int patch, @Nullable String qualifier) {
-        this(major, minor, micro, patch, qualifier, PATCH_SCHEME);
+        this(major, minor, micro, patch, qualifier, PATCH_SCHEME, true);
     }
 
-    private VersionNumber(int major, int minor, int micro, int patch, @Nullable String qualifier, AbstractScheme scheme) {
+    private VersionNumber(int major, int minor, int micro, int patch, @Nullable String qualifier, AbstractScheme scheme, boolean logDeprecation) {
         this.major = major;
         this.minor = minor;
         this.micro = micro;
         this.patch = patch;
         this.qualifier = qualifier;
         this.scheme = scheme;
+        if (logDeprecation) {
+            logDeprecation(7);
+            deprecationLogged = true;
+        }
+    }
+
+    private void maybeLogDeprecation() {
+        if(!deprecationLogged) {
+            logDeprecation(7);
+        }
     }
 
     public int getMajor() {
+        maybeLogDeprecation();
         return major;
     }
 
     public int getMinor() {
+        maybeLogDeprecation();
         return minor;
     }
 
     public int getMicro() {
+        maybeLogDeprecation();
         return micro;
     }
 
     public int getPatch() {
+        maybeLogDeprecation();
         return patch;
     }
 
     @Nullable
     public String getQualifier() {
+        maybeLogDeprecation();
         return qualifier;
     }
 
     public VersionNumber getBaseVersion() {
-        return new VersionNumber(major, minor, micro, patch, null, scheme);
+        maybeLogDeprecation();
+        return new VersionNumber(major, minor, micro, patch, null, scheme, false);
     }
 
     @Override
     public int compareTo(VersionNumber other) {
+        logDeprecation(8);
         if (major != other.major) {
             return major - other.major;
         }
@@ -115,6 +143,7 @@ public class VersionNumber implements Comparable<VersionNumber> {
 
     @Override
     public String toString() {
+        maybeLogDeprecation();
         return scheme.format(this);
     }
 
@@ -123,13 +152,14 @@ public class VersionNumber implements Comparable<VersionNumber> {
     }
 
     public static VersionNumber version(int major, int minor) {
-        return new VersionNumber(major, minor, 0, 0, null, DEFAULT_SCHEME);
+        return new VersionNumber(major, minor, 0, 0, null, DEFAULT_SCHEME, false);
     }
 
     /**
      * Returns the default MAJOR.MINOR.MICRO-QUALIFIER scheme.
      */
     public static Scheme scheme() {
+        logDeprecation(7);
         return DEFAULT_SCHEME;
     }
 
@@ -137,16 +167,18 @@ public class VersionNumber implements Comparable<VersionNumber> {
      * Returns the MAJOR.MINOR.MICRO.PATCH-QUALIFIER scheme.
      */
     public static Scheme withPatchNumber() {
+        logDeprecation(7);
         return PATCH_SCHEME;
     }
 
     public static VersionNumber parse(String versionString) {
+        logDeprecation(8);
         return DEFAULT_SCHEME.parse(versionString);
     }
 
     @Nullable
     private String toLowerCase(@Nullable String string) {
-        return string == null ? null : string.toLowerCase();
+        return string == null ? null : string.toLowerCase(Locale.ROOT);
     }
 
     /**
@@ -173,15 +205,14 @@ public class VersionNumber implements Comparable<VersionNumber> {
             }
             Scanner scanner = new Scanner(versionString);
 
-            int major = 0;
-            int minor = 0;
-            int micro = 0;
-            int patch = 0;
 
             if (!scanner.hasDigit()) {
                 return UNKNOWN;
             }
-            major = scanner.scanDigit();
+            int minor = 0;
+            int micro = 0;
+            int patch = 0;
+            int major = scanner.scanDigit();
             if (scanner.isSeparatorAndDigit('.')) {
                 scanner.skipSeparator();
                 minor = scanner.scanDigit();
@@ -196,12 +227,12 @@ public class VersionNumber implements Comparable<VersionNumber> {
             }
 
             if (scanner.isEnd()) {
-                return new VersionNumber(major, minor, micro, patch, null, this);
+                return new VersionNumber(major, minor, micro, patch, null, this, false);
             }
 
             if (scanner.isQualifier()) {
                 scanner.skipSeparator();
-                return new VersionNumber(major, minor, micro, patch, scanner.remainder(), this);
+                return new VersionNumber(major, minor, micro, patch, scanner.remainder(), this, false);
             }
 
             return UNKNOWN;

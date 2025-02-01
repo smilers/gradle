@@ -17,8 +17,8 @@
 package org.gradle.initialization.layout;
 
 import org.gradle.api.internal.GradleInternal;
-import org.gradle.cache.scopes.BuildScopedCache;
-import org.gradle.internal.service.scopes.Scopes;
+import org.gradle.cache.scopes.BuildScopedCacheBuilderFactory;
+import org.gradle.internal.service.scopes.Scope;
 import org.gradle.internal.service.scopes.ServiceScope;
 
 import java.io.File;
@@ -26,16 +26,16 @@ import java.io.File;
 /**
  * Contains information about the build layout, resolved after running the settings script and selecting the default project.
  */
-@ServiceScope(Scopes.Build.class)
+@ServiceScope(Scope.Build.class)
 public class ResolvedBuildLayout {
     private final GradleInternal gradle;
     private final BuildLayout buildLayout;
-    private final BuildScopedCache buildScopedCache;
+    private final BuildScopedCacheBuilderFactory cacheBuilderFactory;
 
-    public ResolvedBuildLayout(GradleInternal gradle, BuildLayout buildLayout, BuildScopedCache buildScopedCache) {
+    public ResolvedBuildLayout(GradleInternal gradle, BuildLayout buildLayout, BuildScopedCacheBuilderFactory cacheBuilderFactory) {
         this.gradle = gradle;
         this.buildLayout = buildLayout;
-        this.buildScopedCache = buildScopedCache;
+        this.cacheBuilderFactory = cacheBuilderFactory;
     }
 
     /**
@@ -50,7 +50,7 @@ public class ResolvedBuildLayout {
     }
 
     public File getBuildScopeCacheDirectory() {
-        return buildScopedCache.getRootDir();
+        return cacheBuilderFactory.getRootDir();
     }
 
     /**

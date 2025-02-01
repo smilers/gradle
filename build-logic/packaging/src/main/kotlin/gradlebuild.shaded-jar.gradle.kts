@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
+import gradlebuild.basics.capitalize
 import gradlebuild.basics.classanalysis.Attributes
+import gradlebuild.basics.decapitalize
 import gradlebuild.shade.ArtifactTypes.buildReceiptType
 import gradlebuild.shade.ArtifactTypes.classTreesType
 import gradlebuild.shade.ArtifactTypes.entryPointsType
@@ -52,10 +54,10 @@ fun registerTransforms() {
                 .attribute(Attributes.minified, true)
             to.attribute(Attributes.artifactType, relocatedClassesAndAnalysisType)
             parameters {
-                shadowPackage.set("org.gradle.internal.impldep")
-                keepPackages.set(shadedJarExtension.keepPackages)
-                unshadedPackages.set(shadedJarExtension.unshadedPackages)
-                ignoredPackages.set(shadedJarExtension.ignoredPackages)
+                shadowPackage = "org.gradle.internal.impldep"
+                keepPackages = shadedJarExtension.keepPackages
+                unshadedPackages = shadedJarExtension.unshadedPackages
+                ignoredPackages = shadedJarExtension.ignoredPackages
             }
         }
 
@@ -87,17 +89,19 @@ fun createConfigurationToShade() = configurations.create("jarsToShade") {
     attributes.attribute(Bundling.BUNDLING_ATTRIBUTE, objects.named(Bundling.EXTERNAL))
     isCanBeResolved = true
     isCanBeConsumed = false
-    withDependencies {
-        this.add(project.dependencies.create(project))
-        this.add(project.dependencies.create(project.dependencies.platform(project(":distributions-dependencies"))))
-    }
+    dependencies.addAllLater(provider {
+        listOf(
+            project.dependencies.create(project),
+            project.dependencies.create(project.dependencies.platform(project(":distributions-dependencies")))
+        )
+    })
 }
 
 fun addShadedJarTask(): TaskProvider<ShadedJar> {
     val configurationToShade = shadedJarExtension.shadedConfiguration
 
     return tasks.register("${project.name.kebabToCamel()}ShadedJar", ShadedJar::class) {
-        jarFile.set(layout.buildDirectory.file(provider { "shaded-jar/${moduleIdentity.baseName.get()}-shaded-${moduleIdentity.version.get().baseVersion.version}.jar" }))
+        jarFile = layout.buildDirectory.file(provider { "shaded-jar/${moduleIdentity.baseName.get()}-shaded-${moduleIdentity.version.get().baseVersion.version}.jar" })
         classTreesConfiguration.from(configurationToShade.artifactViewForType(classTreesType))
         entryPointsConfiguration.from(configurationToShade.artifactViewForType(entryPointsType))
         relocatedClassesConfiguration.from(configurationToShade.artifactViewForType(relocatedClassesType))
@@ -111,11 +115,8 @@ fun addInstallShadedJarTask(shadedJarTask: TaskProvider<ShadedJar>) {
     fun targetFile(): File {
         val file = findProperty(installPathProperty)?.let { File(findProperty(installPathProperty) as String) }
 
-        if (true == file?.isAbsolute) {
-            return file
-        } else {
-            throw IllegalArgumentException("Property $installPathProperty is required and must be absolute!")
-        }
+        require(true == file?.isAbsolute) { "Property $installPathProperty is required and must be absolute!" }
+        return file!!
     }
     tasks.register<Copy>("install${project.name.kebabToPascal()}ShadedJar") {
         from(shadedJarTask.map { it.jarFile })
@@ -185,6 +186,6 @@ fun Configuration.artifactViewForType(artifactTypeName: String) = incoming.artif
     attributes.attribute(Attributes.artifactType, artifactTypeName)
 }.files
 
-fun String.kebabToPascal() = split("-").map { it.capitalize() }.joinToString("")
+fun String.kebabToPascal() = split("-").joinToString("") { it.capitalize() }
 
 fun String.kebabToCamel() = kebabToPascal().decapitalize()

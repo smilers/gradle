@@ -1,23 +1,24 @@
 package configurations
 
 import common.JvmCategory
+import common.Os
+import common.buildScanTagParam
+import common.getBuildScanCustomValueParam
+import common.requiresNotEc2Agent
 import common.toCapitalized
-import jetbrains.buildServer.configs.kotlin.v2019_2.buildFeatures.parallelTests
 import model.CIBuildModel
 import model.Stage
 
-class SmokeTests(model: CIBuildModel, stage: Stage, testJava: JvmCategory, task: String = "smokeTest", splitNumber: Int = 1) : BaseGradleBuildType(stage = stage, init = {
-    id("${model.projectId}_${task.toCapitalized()}s${testJava.version.name.toCapitalized()}")
+class SmokeTests(model: CIBuildModel, stage: Stage, testJava: JvmCategory, id: String, task: String = "smokeTest", splitNumber: Int = 1) : OsAwareBaseGradleBuildType(os = Os.LINUX, stage = stage, init = {
+    id("${model.projectId}_SmokeTest_$id")
     name = "Smoke Tests with 3rd Party Plugins ($task) - ${testJava.version.name.toCapitalized()} Linux"
     description = "Smoke tests against third party plugins to see if they still work with the current Gradle version"
 
-    features {
-        publishBuildStatusToGithub(model)
-        if (splitNumber > 1) {
-            parallelTests {
-                numberOfBatches = splitNumber
-            }
-        }
+    tcParallelTests(splitNumber)
+
+    requirements {
+        // Smoke tests is usually heavy and the build time is twice on EC2 agents
+        requiresNotEc2Agent()
     }
 
     applyTestDefaults(
@@ -25,10 +26,11 @@ class SmokeTests(model: CIBuildModel, stage: Stage, testJava: JvmCategory, task:
         this,
         ":smoke-test:$task",
         timeout = 120,
-        notQuick = true,
-        extraParameters = buildScanTag("SmokeTests") +
-            " -PtestJavaVersion=${testJava.version.major}" +
-            " -PtestJavaVendor=${testJava.vendor.name}" +
-            " -Porg.gradle.java.installations.auto-download=false"
+        extraParameters = listOf(
+            stage.getBuildScanCustomValueParam(),
+            buildScanTagParam("SmokeTests"),
+            "-PtestJavaVersion=${testJava.version.major}",
+            "-PtestJavaVendor=${testJava.vendor.name}"
+        ).joinToString(" ")
     )
 })

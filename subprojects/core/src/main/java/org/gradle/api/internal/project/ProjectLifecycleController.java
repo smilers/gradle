@@ -19,24 +19,45 @@ package org.gradle.api.internal.project;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
 import org.gradle.initialization.DefaultProjectDescriptor;
 import org.gradle.internal.DisplayName;
+import org.gradle.internal.Factory;
 import org.gradle.internal.build.BuildState;
+import org.gradle.internal.logging.LoggingManagerInternal;
 import org.gradle.internal.model.StateTransitionController;
 import org.gradle.internal.model.StateTransitionControllerFactory;
-import org.gradle.internal.service.scopes.Scopes;
+import org.gradle.internal.service.CloseableServiceRegistry;
+import org.gradle.internal.service.ServiceRegistry;
+import org.gradle.internal.service.scopes.ProjectScopeServices;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceRegistryFactory;
 import org.gradle.internal.service.scopes.ServiceScope;
 
-@ServiceScope(Scopes.Project.class)
-public class ProjectLifecycleController {
+import java.io.Closeable;
+
+/**
+ * Controls the lifecycle of the mutable {@link ProjectInternal} instance for a project, plus its services.
+ */
+@ServiceScope(Scope.Project.class)
+public class ProjectLifecycleController implements Closeable {
+    private final ServiceRegistry buildServices;
+    private final StateTransitionController<State> controller;
     private ProjectInternal project;
+    private CloseableServiceRegistry projectScopeServices;
 
     private enum State implements StateTransitionController.State {
         NotCreated, Created, Configured
     }
 
-    private final StateTransitionController<State> controller;
-
-    public ProjectLifecycleController(DisplayName displayName, StateTransitionControllerFactory factory) {
+    public ProjectLifecycleController(DisplayName displayName, StateTransitionControllerFactory factory, ServiceRegistry buildServices) {
+        this.buildServices = buildServices;
         controller = factory.newController(displayName, State.NotCreated);
+    }
+
+    public boolean isCreated() {
+        return project != null;
+    }
+
+    public void assertConfigured() {
+        controller.assertInStateOrLater(State.Configured);
     }
 
     public void createMutableModel(
@@ -50,7 +71,12 @@ public class ProjectLifecycleController {
         controller.transition(State.NotCreated, State.Created, () -> {
             ProjectState parent = owner.getBuildParent();
             ProjectInternal parentModel = parent == null ? null : parent.getMutableModel();
-            project = projectFactory.createProject(build.getMutableModel(), descriptor, owner, parentModel, selfClassLoaderScope, baseClassLoaderScope);
+            ServiceRegistryFactory serviceRegistryFactory = domainObject -> {
+                final Factory<LoggingManagerInternal> loggingManagerFactory = buildServices.getFactory(LoggingManagerInternal.class);
+                projectScopeServices = ProjectScopeServices.create(buildServices, (ProjectInternal) domainObject, loggingManagerFactory);
+                return projectScopeServices;
+            };
+            project = projectFactory.createProject(build.getMutableModel(), descriptor, owner, parentModel, serviceRegistryFactory, selfClassLoaderScope, baseClassLoaderScope);
         });
     }
 
@@ -60,12 +86,24 @@ public class ProjectLifecycleController {
     }
 
     public void ensureSelfConfigured() {
-        controller.maybeTransitionIfNotCurrentlyTransitioning(State.Created, State.Configured, () -> project.evaluate());
+        controller.maybeTransitionIfNotCurrentlyTransitioning(State.Created, State.Configured, () -> project.evaluateUnchecked());
     }
 
     public void ensureTasksDiscovered() {
         ensureSelfConfigured();
         project.getTasks().discoverTasks();
         project.bindAllModelRules();
+    }
+
+    @Override
+    public void close() {
+        if (project != null) {
+            try {
+                projectScopeServices.close();
+            } finally {
+                project = null;
+                projectScopeServices = null;
+            }
+        }
     }
 }

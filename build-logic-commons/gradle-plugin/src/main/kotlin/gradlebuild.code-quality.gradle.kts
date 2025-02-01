@@ -1,3 +1,8 @@
+import groovy.lang.GroovySystem
+import net.ltgt.gradle.errorprone.CheckSeverity
+import net.ltgt.gradle.errorprone.errorprone
+import org.gradle.util.internal.VersionNumber
+
 /*
  * Copyright 2022 the original author or authors.
  *
@@ -13,19 +18,72 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import gradlebuild.classycle.tasks.Classycle
-import gradlebuild.classycle.extension.ClassycleExtension
 
 plugins {
     id("base")
     id("checkstyle")
     id("codenarc")
+    id("net.ltgt.errorprone")
+}
+
+open class ErrorProneProjectExtension(
+    val disabledChecks: ListProperty<String>
+)
+
+open class ErrorProneSourceSetExtension(
+    val enabled: Property<Boolean>
+)
+
+val errorproneExtension = project.extensions.create<ErrorProneProjectExtension>("errorprone", project.objects.listProperty<String>())
+errorproneExtension.disabledChecks.addAll(
+    // DISCUSS
+    "EnumOrdinal", // This violation is ubiquitous, though most are benign.
+    "EqualsGetClass", // Let's agree if we want to adopt Error Prone's idea of valid equals()
+    "JdkObsolete", // Most of the checks are good, but we do not want to replace all LinkedLists without a good reason
+
+    // NEVER
+    "MissingSummary", // We have another mechanism to check Javadocs on public API
+    "InjectOnConstructorOfAbstractClass", // We use abstract injection as a pattern
+    "JavaxInjectOnAbstractMethod", // We use abstract injection as a pattern
+    "JavaUtilDate", // We are fine with using Date
+    "StringSplitter", // We are fine with using String.split() as is
+)
+
+project.plugins.withType<JavaBasePlugin> {
+    project.extensions.getByName<SourceSetContainer>("sourceSets").configureEach {
+        val extension = this.extensions.create<ErrorProneSourceSetExtension>("errorprone", project.objects.property<Boolean>())
+        // Enable it only for the main source set by default, as incremental Groovy
+        // joint-compilation doesn't work with the Error Prone annotation processor
+        extension.enabled.convention(this.name == "main")
+
+        project.dependencies.addProvider(
+            annotationProcessorConfigurationName,
+            // don't forget to update the version in distributions-dependencies/build.gradle.kts
+            // 2.31.0 is the latest version that works with JDK 11
+            extension.enabled.filter { it }.map { "com.google.errorprone:error_prone_core:2.31.0" }
+        )
+
+        project.tasks.named<JavaCompile>(this.compileJavaTaskName) {
+            options.errorprone {
+                isEnabled = extension.enabled
+                checks.set(errorproneExtension.disabledChecks.map {
+                    it.associateWith { CheckSeverity.OFF }
+                })
+            }
+        }
+    }
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    options.errorprone {
+        disableWarningsInGeneratedCode = true
+        allErrorsAsWarnings = true
+    }
 }
 
 val codeQuality = tasks.register("codeQuality") {
     dependsOn(tasks.withType<CodeNarc>())
     dependsOn(tasks.withType<Checkstyle>())
-    dependsOn(tasks.withType<Classycle>())
     dependsOn(tasks.withType<ValidatePlugins>())
 }
 
@@ -45,14 +103,9 @@ val rules by configurations.creating {
     }
 }
 
-val classycle by configurations.creating {
-    isVisible = false
-    isCanBeConsumed = false
-
-    attributes {
-        attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
-    }
-}
+val groovyVersion = GroovySystem.getVersion()
+val isAtLeastGroovy4 = VersionNumber.parse(groovyVersion).major >= 4
+val codenarcVersion = if (isAtLeastGroovy4) "3.1.0-groovy-4.0" else "3.1.0"
 
 dependencies {
     rules("gradlebuild:code-quality-rules") {
@@ -61,13 +114,13 @@ dependencies {
     codenarc("gradlebuild:code-quality-rules") {
         because("Provides the IntegrationTestFixturesRule implementation")
     }
-    codenarc("org.codenarc:CodeNarc:3.0.1")
+    codenarc("org.codenarc:CodeNarc:$codenarcVersion")
     codenarc(embeddedKotlin("stdlib"))
 
-    classycle("classycle:classycle:1.4.2@jar")
-
     components {
-        withModule<CodeNarcRule>("org.codenarc:CodeNarc")
+        withModule<CodeNarcRule>("org.codenarc:CodeNarc") {
+            params(groovyVersion)
+        }
     }
 }
 
@@ -77,7 +130,9 @@ checkstyle {
     toolVersion = "8.12"
     config = configFile("checkstyle.xml")
     val projectDirectory = layout.projectDirectory
-    configDirectory.set(rules.elements.map { projectDirectory.dir(it.single().asFile.absolutePath).dir("checkstyle") })
+    configDirectory = rules.elements.map {
+        projectDirectory.dir(it.single().asFile.absolutePath).dir("checkstyle")
+    }
 }
 
 plugins.withType<GroovyBasePlugin> {
@@ -86,55 +141,43 @@ plugins.withType<GroovyBasePlugin> {
             config = configFile("checkstyle-groovy.xml")
             source(allGroovy)
             classpath = compileClasspath
-            reports.xml.outputLocation.set(checkstyle.reportsDir.resolve("${this@all.name}-groovy.xml"))
+            reports.xml.outputLocation = checkstyle.reportsDir.resolve("${this@all.name}-groovy.xml")
         }
     }
 }
 
 codenarc {
     config = configFile("codenarc.xml")
+    reportFormat = "console"
 }
 
 tasks.withType<CodeNarc>().configureEach {
-    reports.xml.required.set(true)
     if (name.contains("IntegTest")) {
         config = configFile("codenarc-integtests.xml")
     }
 }
 
-val classycleExtension = extensions.create<ClassycleExtension>("classycle").apply {
-    excludePatterns.convention(emptyList())
-}
-
-extensions.findByType<SourceSetContainer>()?.all {
-    tasks.register<Classycle>(getTaskName("classycle", null)) {
-        classycleClasspath.from(classycle)
-        classesDirs.from(output.classesDirs)
-        excludePatterns.set(classycleExtension.excludePatterns)
-        reportName.set(this@all.name)
-        reportDir.set(reporting.baseDirectory.dir("classycle"))
-        reportResourcesZip.from(rules)
-    }
-}
-
 val SourceSet.allGroovy: SourceDirectorySet
-    get() = withConvention(GroovySourceSet::class) { allGroovy }
+    get() = the<GroovySourceDirectorySet>()
 
-abstract class CodeNarcRule : ComponentMetadataRule {
+abstract class CodeNarcRule @Inject constructor(
+    private val groovyVersion: String
+) : ComponentMetadataRule {
     override fun execute(context: ComponentMetadataContext) {
         context.details.allVariants {
             withDependencies {
-                removeAll { it.group == "org.codehaus.groovy" }
-                add("org.codehaus.groovy:groovy") {
-                    version { prefer(groovy.lang.GroovySystem.getVersion()) }
+                val isAtLeastGroovy4 = VersionNumber.parse(groovyVersion).major >= 4
+                val groovyGroup = if (isAtLeastGroovy4) "org.apache.groovy" else "org.codehaus.groovy"
+                removeAll { it.group == groovyGroup }
+                add("$groovyGroup:groovy") {
+                    version { prefer(groovyVersion) }
                     because("We use the packaged groovy")
                 }
-                add("org.codehaus.groovy:groovy-templates") {
-                    version { prefer(groovy.lang.GroovySystem.getVersion()) }
+                add("$groovyGroup:groovy-templates") {
+                    version { prefer(groovyVersion) }
                     because("We use the packaged groovy")
                 }
             }
         }
     }
 }
-

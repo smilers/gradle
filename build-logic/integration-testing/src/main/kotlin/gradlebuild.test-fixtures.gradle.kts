@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 
-import gradlebuild.basics.accessors.groovy
-
-import org.gradle.api.plugins.internal.JvmPluginsHelper
 import org.gradle.plugins.ide.idea.model.IdeaModel
 
 /**
@@ -30,8 +27,8 @@ import org.gradle.plugins.ide.idea.model.IdeaModel
  * Configures the Project as a test fixtures consumer according to the `testFixtures` extension configuration.
  */
 plugins {
-    `java-library`
     `java-test-fixtures`
+    groovy
     id("gradlebuild.dependency-modules")
 }
 
@@ -69,21 +66,6 @@ if (project.name != "gradle-kotlin-dsl-accessors" && project.name != "test" /* r
     }
 }
 
-// Add an outgoing variant allowing to select the exploded resources directory
-// as this is required at least by one project (idePlay)
-val processResources = tasks.named<ProcessResources>("processTestFixturesResources")
-testFixturesRuntimeElements.outgoing.variants.maybeCreate("resources").run {
-    attributes.attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
-    attributes.attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category.LIBRARY))
-    attributes.attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements.RESOURCES))
-
-    artifact(object : JvmPluginsHelper.IntermediateJavaArtifact(ArtifactTypeDefinition.JVM_RESOURCES_DIRECTORY, processResources) {
-        override fun getFile(): File {
-            return processResources.get().destinationDir
-        }
-    })
-}
-
 // Do not publish test fixture, we use them only internal for now
 val javaComponent = components["java"] as AdhocComponentWithVariants
 javaComponent.withVariantsFromConfiguration(testFixturesRuntimeElements) {
@@ -97,9 +79,9 @@ plugins.withType<IdeaPlugin> {
     configure<IdeaModel> {
         module {
             val testFixtures = sourceSets.testFixtures.get()
-            testSourceDirs = testSourceDirs + testFixtures.java.srcDirs
-            testSourceDirs = testSourceDirs + testFixtures.groovy.srcDirs
-            testResourceDirs = testResourceDirs + testFixtures.resources.srcDirs
+            testSources.from(testFixtures.java.srcDirs)
+            testSources.from(testFixtures.groovy.srcDirs)
+            testResources.from(testFixtures.resources.srcDirs)
         }
     }
 }

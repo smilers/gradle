@@ -16,31 +16,51 @@
 
 package org.gradle.composite.internal.plugins;
 
+import org.gradle.api.artifacts.component.BuildIdentifier;
+import org.gradle.api.internal.artifacts.DefaultProjectDependencyFactory;
+import org.gradle.api.internal.artifacts.ivyservice.projectmodule.ProjectPublicationRegistry;
+import org.gradle.api.internal.plugins.PluginManagerInternal;
+import org.gradle.api.internal.project.HoldsProjectState;
 import org.gradle.internal.build.BuildIncluder;
-import org.gradle.internal.build.BuildState;
-import org.gradle.internal.build.BuildStateRegistry;
 import org.gradle.internal.build.IncludedBuildState;
-import org.gradle.plugin.management.internal.InvalidPluginRequestException;
 import org.gradle.plugin.management.internal.PluginRequestInternal;
 import org.gradle.plugin.use.PluginId;
 import org.gradle.plugin.use.resolve.internal.PluginResolution;
 import org.gradle.plugin.use.resolve.internal.PluginResolutionResult;
+import org.gradle.plugin.use.resolve.internal.PluginResolutionVisitor;
 import org.gradle.plugin.use.resolve.internal.PluginResolver;
 import org.gradle.plugin.use.resolve.internal.PluginResolverContributor;
+import org.gradle.plugin.use.resolve.internal.local.PluginPublication;
+import org.gradle.util.Path;
 
+import javax.annotation.Nullable;
+import javax.inject.Inject;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
-public class CompositeBuildPluginResolverContributor implements PluginResolverContributor {
+public class CompositeBuildPluginResolverContributor implements PluginResolverContributor, HoldsProjectState {
 
     private static final String SOURCE_DESCRIPTION = "Included Builds";
 
-    private final PluginResolver resolver;
+    private final CompositeBuildPluginResolver resolver;
 
-    public CompositeBuildPluginResolverContributor(BuildStateRegistry buildRegistry, BuildState consumingBuild, BuildIncluder buildIncluder) {
-        this.resolver = new CompositeBuildPluginResolver(buildRegistry, consumingBuild, buildIncluder);
+    @Inject
+    public CompositeBuildPluginResolverContributor(
+        BuildIncluder buildIncluder,
+        ProjectPublicationRegistry publicationRegistry,
+        DefaultProjectDependencyFactory projectDependencyFactory
+    ) {
+        this.resolver = new CompositeBuildPluginResolver(
+            buildIncluder,
+            publicationRegistry,
+            projectDependencyFactory
+        );
+    }
+
+    @Override
+    public void discardAll() {
+        resolver.discardAll();
     }
 
     @Override
@@ -48,62 +68,132 @@ public class CompositeBuildPluginResolverContributor implements PluginResolverCo
         resolvers.add(resolver);
     }
 
+    private abstract static class PluginResult {
+        static final PluginResult NOT_FOUND_IN_ANY_BUILD = new PluginResult() {};
+        static final PluginResult NO_INCLUDED_BUILDS = new PluginResult() {};
+    }
+
+    private static class ResolvedPlugin extends PluginResult {
+        final PluginResolution resolution;
+
+        public ResolvedPlugin(PluginResolution resolution) {
+            this.resolution = resolution;
+        }
+    }
+
     private static class CompositeBuildPluginResolver implements PluginResolver {
 
-        private final BuildStateRegistry buildRegistry;
-        private final BuildState consumingBuild;
         private final BuildIncluder buildIncluder;
+        private final ProjectPublicationRegistry publicationRegistry;
+        private final DefaultProjectDependencyFactory projectDependencyFactory;
 
-        private final Map<PluginId, PluginResolution> results = new HashMap<>();
+        private final Map<PluginId, PluginResult> results = new ConcurrentHashMap<>();
 
-        private CompositeBuildPluginResolver(BuildStateRegistry buildRegistry, BuildState consumingBuild, BuildIncluder buildIncluder) {
-            this.buildRegistry = buildRegistry;
-            this.consumingBuild = consumingBuild;
+        private CompositeBuildPluginResolver(
+            BuildIncluder buildIncluder,
+            ProjectPublicationRegistry publicationRegistry,
+            DefaultProjectDependencyFactory projectDependencyFactory
+        ) {
             this.buildIncluder = buildIncluder;
+            this.publicationRegistry = publicationRegistry;
+            this.projectDependencyFactory = projectDependencyFactory;
         }
 
         @Override
-        public void resolve(PluginRequestInternal pluginRequest, PluginResolutionResult result) throws InvalidPluginRequestException {
-            PluginResolution earlyResolution = resolveFromIncludedPluginBuilds(pluginRequest.getId());
-            if (earlyResolution != null) {
-                result.found(SOURCE_DESCRIPTION, earlyResolution);
+        public PluginResolutionResult resolve(PluginRequestInternal pluginRequest) {
+            PluginResult resolutionResult = results.computeIfAbsent(pluginRequest.getId(), this::doResolve);
+            if (resolutionResult == PluginResult.NOT_FOUND_IN_ANY_BUILD) {
+                return PluginResolutionResult.notFound(SOURCE_DESCRIPTION, "None of the included builds contain this plugin");
+            } else if (resolutionResult instanceof ResolvedPlugin) {
+                return PluginResolutionResult.found(((ResolvedPlugin) resolutionResult).resolution);
             }
 
-            if (buildRegistry.getIncludedBuilds().isEmpty()) {
-                return;
-            }
-
-            PluginResolution resolution = results.computeIfAbsent(pluginRequest.getId(), this::resolvePluginFromIncludedBuilds);
-            if (resolution != null) {
-                result.found(SOURCE_DESCRIPTION, resolution);
-            } else {
-                result.notFound(SOURCE_DESCRIPTION, "None of the included builds contain this plugin");
-            }
+            return PluginResolutionResult.notFound(SOURCE_DESCRIPTION, "No included builds contain this plugin");
         }
 
-        private PluginResolution resolvePluginFromIncludedBuilds(PluginId requestedPluginId) {
-            for (IncludedBuildState build : buildRegistry.getIncludedBuilds()) {
-                if (build == consumingBuild || build.isImplicitBuild() || build.isPluginBuild()) {
-                    continue;
-                }
-                Optional<PluginResolution> pluginResolution = build.withState(gradleInternal -> LocalPluginResolution.resolvePlugin(gradleInternal, requestedPluginId));
-                if (pluginResolution.isPresent()) {
-                    return pluginResolution.get();
+        private PluginResult doResolve(PluginId pluginId) {
+            PluginResolution earlyResolution = resolveFromIncludedPluginBuilds(pluginId);
+            if (earlyResolution != null) {
+                return new ResolvedPlugin(earlyResolution);
+            }
+            return resolvePluginFromIncludedBuilds(pluginId);
+        }
+
+        private PluginResult resolvePluginFromIncludedBuilds(PluginId requestedPluginId) {
+            Collection<IncludedBuildState> includedBuilds = buildIncluder.getIncludedBuildsForPluginResolution();
+            if (includedBuilds.isEmpty()) {
+                return PluginResult.NO_INCLUDED_BUILDS;
+            }
+            for (IncludedBuildState build : includedBuilds) {
+                PluginResolution pluginResolution = resolvePlugin(requestedPluginId, build.getBuildIdentifier());
+                if (pluginResolution != null) {
+                    return new ResolvedPlugin(pluginResolution);
                 }
             }
-            return null;
+            return PluginResult.NOT_FOUND_IN_ANY_BUILD;
         }
 
         private PluginResolution resolveFromIncludedPluginBuilds(PluginId requestedPluginId) {
-            for (IncludedBuildState build : buildIncluder.includeRegisteredPluginBuilds()) {
-                buildRegistry.ensureConfigured(build);
-
-                Optional<PluginResolution> pluginResolution = build.withState(gradleInternal -> LocalPluginResolution.resolvePlugin(gradleInternal, requestedPluginId));
-                if (pluginResolution.isPresent()) {
-                    return pluginResolution.get();
+            for (IncludedBuildState build : buildIncluder.getRegisteredPluginBuilds()) {
+                buildIncluder.prepareForPluginResolution(build);
+                PluginResolution pluginResolution = resolvePlugin(requestedPluginId, build.getBuildIdentifier());
+                if (pluginResolution != null) {
+                    return pluginResolution;
                 }
             }
             return null;
         }
+
+        @Nullable
+        private PluginResolution resolvePlugin(PluginId requestedPluginId, BuildIdentifier buildIdentity) {
+            Collection<ProjectPublicationRegistry.PublicationForProject<PluginPublication>> publicationsForBuild =
+                publicationRegistry.getPublicationsForBuild(PluginPublication.class, buildIdentity);
+
+            for (ProjectPublicationRegistry.PublicationForProject<PluginPublication> publication : publicationsForBuild) {
+                PluginId pluginId = publication.getPublication().getPluginId();
+                if (pluginId.equals(requestedPluginId)) {
+                    return new LocalPluginResolution(pluginId, publication.getProducingProjectId().getBuildTreePath(), projectDependencyFactory);
+                }
+            }
+
+            return null;
+        }
+
+        public void discardAll() {
+            results.clear();
+        }
     }
+
+    private static class LocalPluginResolution implements PluginResolution {
+
+        private final PluginId pluginId;
+        private final Path producingProjectIdentityPath;
+        private final DefaultProjectDependencyFactory projectDependencyFactory;
+
+        public LocalPluginResolution(
+            PluginId pluginId,
+            Path producingProjectIdentityPath,
+            DefaultProjectDependencyFactory projectDependencyFactory
+        ) {
+            this.pluginId = pluginId;
+            this.producingProjectIdentityPath = producingProjectIdentityPath;
+            this.projectDependencyFactory = projectDependencyFactory;
+        }
+
+        @Override
+        public PluginId getPluginId() {
+            return pluginId;
+        }
+
+        @Override
+        public void accept(PluginResolutionVisitor visitor) {
+            visitor.visitDependency(projectDependencyFactory.create(producingProjectIdentityPath));
+        }
+
+        @Override
+        public void applyTo(PluginManagerInternal pluginManager) {
+            pluginManager.apply(pluginId.getId());
+        }
+    }
+
 }

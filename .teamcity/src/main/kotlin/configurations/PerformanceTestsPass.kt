@@ -18,12 +18,14 @@ package configurations
 
 import common.Os
 import common.applyDefaultSettings
-import jetbrains.buildServer.configs.kotlin.v2019_2.ReuseBuilds
+import jetbrains.buildServer.configs.kotlin.ParameterDisplay
+import jetbrains.buildServer.configs.kotlin.ReuseBuilds
 import model.CIBuildModel
 import model.PerformanceTestType
 import projects.PerformanceTestProject
 
-class PerformanceTestsPass(model: CIBuildModel, performanceTestProject: PerformanceTestProject) : BaseGradleBuildType(
+class PerformanceTestsPass(model: CIBuildModel, performanceTestProject: PerformanceTestProject) : OsAwareBaseGradleBuildType(
+    os = performanceTestProject.spec.os,
     failStage = performanceTestProject.spec.failsStage,
     init = {
         id("${performanceTestProject.spec.asConfigurationId(model)}_Trigger")
@@ -35,9 +37,16 @@ class PerformanceTestsPass(model: CIBuildModel, performanceTestProject: Performa
 
         applyDefaultSettings(os)
         params {
+            text(
+                "reverse.dep.*.performance.baselines",
+                type.defaultBaselines,
+                display = ParameterDisplay.PROMPT,
+                allowEmpty = true,
+                description = "The baselines you want to run performance tests against. Empty means default baseline."
+            )
             param("env.PERFORMANCE_DB_PASSWORD_TCAGENT", "%performance.db.password.tcagent%")
             param("performance.db.username", "tcagent")
-            param("performance.channel", performanceTestSpec.channel())
+            param("env.PERFORMANCE_CHANNEL", performanceTestSpec.channel())
         }
 
         features {
@@ -53,21 +62,24 @@ class PerformanceTestsPass(model: CIBuildModel, performanceTestProject: Performa
             "performanceTestReport"
 
         artifactRules = """
-subprojects/$performanceProjectName/build/performance-test-results.zip
+testing/$performanceProjectName/build/performance-test-results.zip
 """
         if (performanceTestProject.performanceTests.any { it.testProjects.isNotEmpty() }) {
             val dependencyBuildIds = performanceTestProject.performanceTests
                 .filter { it.testProjects.isNotEmpty() }
                 .joinToString(",") { "%dep.${it.id}.env.BUILD_ID%" }
 
+            val dependencyBaselines = performanceTestProject.performanceTests.first { it.testProjects.isNotEmpty() }.let { "%dep.${it.id}.performance.baselines%" }
+
             gradleRunnerStep(
                 model,
-                ":$performanceProjectName:$taskName --channel %performance.channel%",
+                ":$performanceProjectName:$taskName",
                 extraParameters = listOf(
                     "-Porg.gradle.performance.branchName" to "%teamcity.build.branch%",
                     "-Porg.gradle.performance.db.url" to "%performance.db.url%",
                     "-Porg.gradle.performance.db.username" to "%performance.db.username%",
-                    "-Porg.gradle.performance.dependencyBuildIds" to dependencyBuildIds
+                    "-Porg.gradle.performance.dependencyBuildIds" to dependencyBuildIds,
+                    "-PperformanceBaselines" to dependencyBaselines
                 ).joinToString(" ") { (key, value) -> os.escapeKeyValuePair(key, value) }
             )
         }

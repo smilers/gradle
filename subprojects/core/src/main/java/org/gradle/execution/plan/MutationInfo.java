@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 the original author or authors.
+ * Copyright 2025 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,22 +16,57 @@
 
 package org.gradle.execution.plan;
 
-import com.google.common.collect.Sets;
+import com.google.common.collect.ImmutableSet;
 
-import java.util.Set;
+public class MutationInfo {
 
-class MutationInfo {
-    final Node node;
-    final Set<Node> consumingNodes = Sets.newHashSet();
-    final Set<String> outputPaths = Sets.newHashSet();
-    final Set<String> destroyablePaths = Sets.newHashSet();
-    boolean hasFileInputs;
-    boolean hasOutputs;
-    boolean hasLocalState;
-    boolean resolved;
-    boolean hasValidationProblem;
+    public static final MutationInfo EMPTY = new MutationInfo(ImmutableSet.of(), ImmutableSet.of(), false, false, false, false);
 
-    MutationInfo(Node node) {
-        this.node = node;
+    private final ImmutableSet<String> outputPaths;
+    private final ImmutableSet<String> destroyablePaths;
+    private final boolean hasFileInputs;
+    private final boolean hasOutputs;
+    private final boolean hasLocalState;
+    private final boolean hasValidationProblem;
+
+    public MutationInfo(
+        ImmutableSet<String> outputPaths,
+        ImmutableSet<String> destroyablePaths,
+        boolean hasFileInputs,
+        boolean hasOutputs,
+        boolean hasLocalState,
+        boolean hasValidationProblem
+    ) {
+        this.outputPaths = outputPaths;
+        this.destroyablePaths = destroyablePaths;
+        this.hasFileInputs = hasFileInputs;
+        this.hasOutputs = hasOutputs;
+        this.hasLocalState = hasLocalState;
+        this.hasValidationProblem = hasValidationProblem;
     }
+
+    public ImmutableSet<String> getOutputPaths() {
+        return outputPaths;
+    }
+
+    public ImmutableSet<String> getDestroyablePaths() {
+        return destroyablePaths;
+    }
+
+    public boolean hasValidationProblem() {
+        return hasValidationProblem;
+    }
+
+    public boolean hasLocalState() {
+        return hasLocalState;
+    }
+
+    public boolean hasOutputs() {
+        return hasOutputs;
+    }
+
+    public boolean hasFileInputs() {
+        return hasFileInputs;
+    }
+
 }

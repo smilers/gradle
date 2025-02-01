@@ -20,6 +20,8 @@ import org.gradle.api.Incubating;
 import org.gradle.api.artifacts.dsl.ComponentMetadataHandler;
 import org.gradle.api.artifacts.dsl.RepositoryHandler;
 import org.gradle.api.provider.Property;
+import org.gradle.declarative.dsl.model.annotations.Configuring;
+import org.gradle.declarative.dsl.model.annotations.Restricted;
 import org.gradle.internal.HasInternalProtocol;
 
 /**
@@ -28,20 +30,24 @@ import org.gradle.internal.HasInternalProtocol;
  * @since 6.8
  *
  */
-@Incubating
 @HasInternalProtocol
 public interface DependencyResolutionManagement {
     /**
      * Configures the repositories used by all projects
      * @param repositoryConfiguration the repositories configuration
      */
+    @Incubating
+    @Configuring
     void repositories(Action<? super RepositoryHandler> repositoryConfiguration);
 
     /**
      * Returns the shared repository handler
      */
+    @Incubating
     RepositoryHandler getRepositories();
 
+    @Incubating
+    @Restricted
     Property<RepositoriesMode> getRepositoriesMode();
 
     /**

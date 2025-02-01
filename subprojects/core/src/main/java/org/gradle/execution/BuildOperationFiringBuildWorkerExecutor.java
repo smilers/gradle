@@ -17,34 +17,34 @@
 package org.gradle.execution;
 
 import org.gradle.api.internal.GradleInternal;
-import org.gradle.execution.plan.ExecutionPlan;
+import org.gradle.execution.plan.FinalizedExecutionPlan;
 import org.gradle.initialization.BuildRequestMetaData;
 import org.gradle.internal.build.ExecutionResult;
 import org.gradle.internal.operations.BuildOperationCategory;
 import org.gradle.internal.operations.BuildOperationContext;
 import org.gradle.internal.operations.BuildOperationDescriptor;
-import org.gradle.internal.operations.BuildOperationExecutor;
+import org.gradle.internal.operations.BuildOperationRunner;
 import org.gradle.internal.operations.CallableBuildOperation;
 
 public class BuildOperationFiringBuildWorkerExecutor implements BuildWorkExecutor {
     private final BuildWorkExecutor delegate;
-    private final BuildOperationExecutor buildOperationExecutor;
+    private final BuildOperationRunner buildOperationRunner;
 
-    public BuildOperationFiringBuildWorkerExecutor(BuildWorkExecutor delegate, BuildOperationExecutor buildOperationExecutor) {
+    public BuildOperationFiringBuildWorkerExecutor(BuildWorkExecutor delegate, BuildOperationRunner buildOperationRunner) {
         this.delegate = delegate;
-        this.buildOperationExecutor = buildOperationExecutor;
+        this.buildOperationRunner = buildOperationRunner;
     }
 
     @Override
-    public ExecutionResult<Void> execute(GradleInternal gradle, ExecutionPlan plan) {
-        return buildOperationExecutor.call(new ExecuteTasks(gradle, plan));
+    public ExecutionResult<Void> execute(GradleInternal gradle, FinalizedExecutionPlan plan) {
+        return buildOperationRunner.call(new ExecuteTasks(gradle, plan));
     }
 
     private class ExecuteTasks implements CallableBuildOperation<ExecutionResult<Void>> {
         private final GradleInternal gradle;
-        private final ExecutionPlan plan;
+        private final FinalizedExecutionPlan plan;
 
-        public ExecuteTasks(GradleInternal gradle, ExecutionPlan plan) {
+        public ExecuteTasks(GradleInternal gradle, FinalizedExecutionPlan plan) {
             this.gradle = gradle;
             this.plan = plan;
         }

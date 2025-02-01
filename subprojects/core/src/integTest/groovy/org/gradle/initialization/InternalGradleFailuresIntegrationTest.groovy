@@ -26,7 +26,7 @@ class InternalGradleFailuresIntegrationTest extends AbstractIntegrationSpec {
         executer.requireOwnGradleUserHomeDir()
         executer.requireDaemon()
 
-        buildScript """
+        buildFile """
             task hello() {
                 doLast {
                     println "Hello Gradle!"
@@ -58,7 +58,7 @@ class InternalGradleFailuresIntegrationTest extends AbstractIntegrationSpec {
 
         then:
         cachesDir.isFile()
-        assertHasStartupFailure(failure, "Cannot create parent directory '${executer.gradleUserHomeDir.file("caches")}")
+        assertHasStartupFailure(failure, "Cannot create directory '${executer.gradleUserHomeDir.file("caches")}")
     }
 
     def "Error message due to unwritable Gradle daemon directory is not scary"() {
@@ -76,6 +76,7 @@ class InternalGradleFailuresIntegrationTest extends AbstractIntegrationSpec {
 
     def "Error message due to unwritable native directory is not scary"() {
         given:
+        executer.withStacktraceEnabled()
         def nativeDir = executer.gradleUserHomeDir.file("native")
         nativeDir.touch()
         executer.withNoExplicitNativeServicesDir()

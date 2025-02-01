@@ -15,8 +15,8 @@
  */
 package org.gradle.internal.xml;
 
-import com.google.common.collect.Lists;
 import groovy.lang.Closure;
+import groovy.lang.DelegatesTo;
 import groovy.util.IndentPrinter;
 import groovy.util.Node;
 import groovy.xml.XmlNodePrinter;
@@ -36,15 +36,14 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
 
-import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.TransformerException;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import java.io.BufferedOutputStream;
+import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
@@ -52,12 +51,14 @@ import java.io.PrintWriter;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 
 public class XmlTransformer implements Transformer<String, String> {
-    private final List<Action<? super XmlProvider>> actions = new ArrayList<Action<? super XmlProvider>>();
-    private final List<Action<? super XmlProvider>> finalizers = Lists.newArrayListWithExpectedSize(2);
+    private final List<Action<? super XmlProvider>> actions = new ArrayList<>();
+    private final List<Action<? super XmlProvider>> finalizers = new ArrayList<>(2);
     private String indentation = "  ";
 
     public void addAction(Action<? super XmlProvider> provider) {
@@ -72,7 +73,7 @@ public class XmlTransformer implements Transformer<String, String> {
         this.indentation = indentation;
     }
 
-    public void addAction(Closure closure) {
+    public void addAction(@DelegatesTo(XmlProvider.class) Closure closure) {
         actions.add(ConfigureUtil.configureUsing(closure));
     }
 
@@ -201,21 +202,15 @@ public class XmlTransformer implements Transformer<String, String> {
         }
 
         public void writeTo(File file) {
-            try {
-                OutputStream outputStream = new BufferedOutputStream(new FileOutputStream(file));
-                try {
-                    writeTo(outputStream);
-                } finally {
-                    outputStream.close();
-                }
+            try (OutputStream outputStream = new BufferedOutputStream(Files.newOutputStream(file.toPath()))) {
+                writeTo(outputStream);
             } catch (IOException e) {
                 throw UncheckedException.throwAsUncheckedException(e);
             }
         }
 
         public void writeTo(OutputStream stream) {
-            try {
-                Writer writer = new OutputStreamWriter(stream, "UTF-8");
+            try(Writer writer = new BufferedWriter(new OutputStreamWriter(stream, StandardCharsets.UTF_8))) {
                 doWriteTo(writer, "UTF-8");
                 writer.flush();
             } catch (IOException e) {
@@ -252,7 +247,7 @@ public class XmlTransformer implements Transformer<String, String> {
             if (element == null) {
                 Document document;
                 try {
-                    document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(new InputSource(new StringReader(toString())));
+                    document = XmlFactories.newDocumentBuilderFactory().newDocumentBuilder().parse(new InputSource(new StringReader(toString())));
                 } catch (Exception e) {
                     throw UncheckedException.throwAsUncheckedException(e);
                 }
@@ -308,7 +303,7 @@ public class XmlTransformer implements Transformer<String, String> {
             int indentAmount = determineIndentAmount();
 
             try {
-                TransformerFactory factory = TransformerFactory.newInstance();
+                TransformerFactory factory = XmlFactories.newTransformerFactory();
                 try {
                     factory.setAttribute("indent-number", indentAmount);
                 } catch (IllegalArgumentException ignored) {

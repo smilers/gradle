@@ -22,9 +22,11 @@ import org.gradle.initialization.DefaultProjectDescriptor;
 import org.gradle.internal.Factory;
 import org.gradle.internal.build.BuildProjectRegistry;
 import org.gradle.internal.build.BuildState;
-import org.gradle.internal.service.scopes.Scopes;
+import org.gradle.internal.service.scopes.Scope;
 import org.gradle.internal.service.scopes.ServiceScope;
+import org.gradle.util.Path;
 
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 import java.util.Collection;
 
@@ -32,7 +34,7 @@ import java.util.Collection;
  * A registry of all projects present in a build tree.
  */
 @ThreadSafe
-@ServiceScope(Scopes.BuildTree.class)
+@ServiceScope(Scope.BuildTree.class)
 public interface ProjectStateRegistry {
     /**
      * Returns all projects in the build tree.
@@ -50,14 +52,25 @@ public interface ProjectStateRegistry {
     ProjectState stateFor(ProjectComponentIdentifier identifier) throws IllegalArgumentException;
 
     /**
+     * Locates the state object that owns the project with the identity path.
+     */
+    ProjectState stateFor(Path identityPath) throws IllegalArgumentException;
+
+    /**
      * Locates the state objects for all projects of the given build.
      */
     BuildProjectRegistry projectsFor(BuildIdentifier buildIdentifier) throws IllegalArgumentException;
 
     /**
+     * Locates the state objects for all projects of the given build, or {@code null} if these are not available yet.
+     */
+    @Nullable
+    BuildProjectRegistry findProjectsFor(BuildIdentifier buildIdentifier);
+
+    /**
      * Registers the projects of a build.
      */
-    void registerProjects(BuildState build, ProjectRegistry<DefaultProjectDescriptor> projectRegistry);
+    void registerProjects(BuildState owner, ProjectRegistry<DefaultProjectDescriptor> projectRegistry);
 
     /**
      * Registers a single project.
@@ -70,4 +83,9 @@ public interface ProjectStateRegistry {
      * DO NOT USE THIS METHOD. It is here to allow some very specific backwards compatibility.
      */
     <T> T allowUncontrolledAccessToAnyProject(Factory<T> factory);
+
+    /**
+     * Discards all projects for the given build.
+     */
+    void discardProjectsFor(BuildState build);
 }

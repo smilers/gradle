@@ -18,16 +18,21 @@ package org.gradle.execution.taskgraph
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.RepoScriptBlockUtil
+import org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache
+import org.gradle.integtests.fixtures.ToBeFixedForIsolatedProjects
 import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.internal.reflect.validation.ValidationMessageChecker
 import org.gradle.test.fixtures.server.http.BlockingHttpServer
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.IntegTestPreconditions
 import org.junit.Rule
-import spock.lang.IgnoreIf
 import spock.lang.Issue
-import spock.lang.Requires
 import spock.lang.Timeout
 
-@IgnoreIf({ GradleContextualExecuter.parallel })
+import static org.gradle.integtests.fixtures.ToBeFixedForConfigurationCache.Skip.INVESTIGATE
+
+@Requires(IntegTestPreconditions.NotParallelExecutor)
+@ToBeFixedForIsolatedProjects(because = "allprojects")
 // no point, always runs in parallel
 class ParallelTaskExecutionIntegrationTest extends AbstractIntegrationSpec implements ValidationMessageChecker {
 
@@ -37,6 +42,7 @@ class ParallelTaskExecutionIntegrationTest extends AbstractIntegrationSpec imple
     def setup() {
         blockingServer.start()
 
+        createDirs("a", "b")
         settingsFile << 'include "a", "b"'
 
         buildFile << """
@@ -92,8 +98,10 @@ class ParallelTaskExecutionIntegrationTest extends AbstractIntegrationSpec imple
             }
 
             allprojects {
+                def pingEndings = ['FailingPing', 'PingWithCacheableWarnings', 'SerialPing', 'InvalidPing']
+
                 tasks.addRule("<>Ping") { String name ->
-                    if (name.endsWith("Ping") && name.size() == 5) {
+                    if (name.endsWith("Ping") && pingEndings.every { !name.endsWith(it) }) {
                         tasks.create(name, Ping)
                     }
                 }
@@ -260,6 +268,7 @@ class ParallelTaskExecutionIntegrationTest extends AbstractIntegrationSpec imple
         }
     }
 
+    @ToBeFixedForConfigurationCache(skip = INVESTIGATE)
     def "tasks from same project do not run in parallel even when tasks do undeclared dependency resolution"() {
         given:
         executer.beforeExecute {
@@ -277,9 +286,10 @@ class ParallelTaskExecutionIntegrationTest extends AbstractIntegrationSpec imple
                 }
 
                 task undeclared {
+                    def runtimeClasspath = configurations.runtimeClasspath
                     doLast {
                         ${blockingServer.callFromBuild("before-resolve")}
-                        configurations.runtimeClasspath.files.each { }
+                        runtimeClasspath.files.each { }
                         ${blockingServer.callFromBuild("after-resolve")}
                     }
                 }
@@ -360,21 +370,21 @@ class ParallelTaskExecutionIntegrationTest extends AbstractIntegrationSpec imple
         buildFile << """
             def foo = file("foo")
 
-            aPing.destroyables.register foo
+            destroyerPing.destroyables.register foo
 
-            bPing.outputs.file foo
-            bPing.doLast { foo << "foo" }
+            producerPing.outputs.file foo
+            producerPing.doLast { foo << "foo" }
 
-            cPing.inputs.file foo
-            cPing.dependsOn bPing
+            consumerPing.inputs.file foo
+            consumerPing.dependsOn producerPing
         """
 
         expect:
         2.times {
-            blockingServer.expectConcurrent(":aPing")
-            blockingServer.expectConcurrent(":bPing")
-            blockingServer.expectConcurrent(":cPing")
-            run ":aPing", ":cPing"
+            blockingServer.expectConcurrent(":destroyerPing")
+            blockingServer.expectConcurrent(":producerPing")
+            blockingServer.expectConcurrent(":consumerPing")
+            run ":destroyerPing", ":consumerPing"
         }
     }
 
@@ -519,9 +529,9 @@ class ParallelTaskExecutionIntegrationTest extends AbstractIntegrationSpec imple
         }
     }
 
-    @Requires({ GradleContextualExecuter.embedded })
+    @Requires(IntegTestPreconditions.IsEmbeddedExecutor)
     // this test only works in embedded mode because of the use of validation test fixtures
-    def "other tasks are not started when an invalid task task is running"() {
+    def "other tasks are not started when an invalid task is running"() {
         given:
         withParallelThreads(3)
         withInvalidPing()
@@ -545,7 +555,7 @@ class ParallelTaskExecutionIntegrationTest extends AbstractIntegrationSpec imple
         run ":aPingWithCacheableWarnings", ":bPing", ":cPing"
     }
 
-    @Requires({ GradleContextualExecuter.embedded })
+    @Requires(IntegTestPreconditions.IsEmbeddedExecutor)
     // this test only works in embedded mode because of the use of validation test fixtures
     def "invalid task is not executed in parallel with other task"() {
         given:
@@ -641,11 +651,11 @@ class ParallelTaskExecutionIntegrationTest extends AbstractIntegrationSpec imple
             }
             subprojects {
                 configurations.create("myconfig1") {
-                    canBeResolved = true
+                    assert canBeResolved
                     canBeConsumed = false
                 }
                 configurations.create("myconfig2") {
-                    canBeResolved = true
+                    assert canBeResolved
                     canBeConsumed = false
                 }
 

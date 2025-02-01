@@ -16,7 +16,7 @@
 
 package org.gradle.api.tasks.options
 
-
+import org.gradle.integtests.fixtures.ToBeFixedForIsolatedProjects
 import spock.lang.Ignore
 
 import static org.gradle.api.tasks.options.TaskOptionFixture.taskWithMultipleOptions
@@ -38,8 +38,10 @@ class TaskOptionFailureIntegrationTest extends AbstractOptionIntegrationSpec {
         failureCauseContains('Cannot specify duplicate annotation on the same member : org.gradle.api.tasks.options.Option')
     }
 
+    @ToBeFixedForIsolatedProjects(because = "Configuring projects from root")
     def "different tasks match name but only one accepts the option"() {
         given:
+        createDirs("other")
         settingsFile << "include 'other'"
         buildFile << """
             task someTask(type: SomeTask)
@@ -87,7 +89,7 @@ class TaskOptionFailureIntegrationTest extends AbstractOptionIntegrationSpec {
 
         then:
         failure.assertHasDescription("Problem configuring task :someTask from command line.")
-        failure.assertHasCause("No argument was provided for command-line option '--second'.")
+        failure.assertHasCause("No argument was provided for command-line option '--second' with description: 'configures 'second' field'")
 
         when:
         runAndFail 'someTask', '--second', 'hey', '--second', 'buddy'

@@ -16,17 +16,16 @@
 package org.gradle.api.file;
 
 import org.gradle.api.Action;
-import org.gradle.api.Incubating;
 import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.util.PatternFilterable;
 import org.gradle.internal.HasInternalProtocol;
+import org.gradle.internal.instrumentation.api.annotations.NotToBeReplacedByLazyProperty;
 
 /**
  * Synchronizes the contents of a destination directory with some source directories and files.
  *
  * @since 7.5
  */
-@Incubating
 @HasInternalProtocol
 public interface SyncSpec extends CopySpec {
 
@@ -36,6 +35,7 @@ public interface SyncSpec extends CopySpec {
      * @return the filter defining the files to preserve
      */
     @Internal
+    @NotToBeReplacedByLazyProperty(because = "Read-only nested like property")
     PatternFilterable getPreserve();
 
     /**

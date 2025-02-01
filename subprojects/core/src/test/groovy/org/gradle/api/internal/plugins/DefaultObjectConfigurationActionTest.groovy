@@ -51,8 +51,8 @@ class DefaultObjectConfigurationActionTest extends Specification {
     void appliesScriptsToDefaultTargetObject() {
         given:
         1 * resolver.resolveUri('script') >> file
-        1 * parentCompileScope.createChild("script-$file") >> scriptCompileScope
-        1 * scriptHandlerFactory.create(_, scriptCompileScope) >> scriptHandler
+        1 * parentCompileScope.createChild("script-$file", null) >> scriptCompileScope
+        1 * scriptHandlerFactory.create(_, scriptCompileScope, _) >> scriptHandler
         1 * scriptPluginFactory.create(_, scriptHandler, scriptCompileScope, parentCompileScope, false) >> configurer
 
         when:
@@ -67,11 +67,11 @@ class DefaultObjectConfigurationActionTest extends Specification {
         Object target1 = new Object()
         Object target2 = new Object()
         1 * resolver.resolveUri('script') >> file
-        1 * scriptHandlerFactory.create(_, scriptCompileScope) >> scriptHandler
+        1 * scriptHandlerFactory.create(_, scriptCompileScope, _) >> scriptHandler
         1 * scriptPluginFactory.create(_, scriptHandler, scriptCompileScope, parentCompileScope, false) >> configurer
         1 * configurer.apply(target1)
         1 * configurer.apply(target2)
-        1 * parentCompileScope.createChild("script-$file") >> scriptCompileScope
+        1 * parentCompileScope.createChild("script-$file", null) >> scriptCompileScope
 
         then:
         action.from('script')
@@ -85,11 +85,11 @@ class DefaultObjectConfigurationActionTest extends Specification {
         Object target1 = new Object()
         Object target2 = new Object()
         1 * resolver.resolveUri('script') >> file
-        1 * scriptHandlerFactory.create(_, scriptCompileScope) >> scriptHandler
+        1 * scriptHandlerFactory.create(_, scriptCompileScope, _) >> scriptHandler
         1 * scriptPluginFactory.create(_, scriptHandler, scriptCompileScope, parentCompileScope, false) >> configurer
         1 * configurer.apply(target1)
         1 * configurer.apply(target2)
-        1 * parentCompileScope.createChild("script-$file") >> scriptCompileScope
+        1 * parentCompileScope.createChild("script-$file", null) >> scriptCompileScope
 
         then:
         action.from('script')

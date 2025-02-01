@@ -16,6 +16,8 @@
 
 package org.gradle.integtests.composite.plugins
 
+import org.gradle.integtests.fixtures.resolve.ResolveFailureTestFixture
+
 class PluginBuildsIntegrationTest extends AbstractPluginBuildIntegrationTest {
 
     def "included plugin builds can contribute settings plugins"() {
@@ -103,7 +105,7 @@ class PluginBuildsIntegrationTest extends AbstractPluginBuildIntegrationTest {
         def repoDeclaration = """
             repositories {
                 maven {
-                    url("${mavenRepo.uri}")
+                    url = "${mavenRepo.uri}"
                 }
             }
         """
@@ -131,7 +133,7 @@ class PluginBuildsIntegrationTest extends AbstractPluginBuildIntegrationTest {
         def repoDeclaration = """
             repositories {
                 maven {
-                    url("${mavenRepo.uri}")
+                    url = "${mavenRepo.uri}"
                 }
             }
         """
@@ -159,7 +161,7 @@ class PluginBuildsIntegrationTest extends AbstractPluginBuildIntegrationTest {
         def repoDeclaration = """
             repositories {
                 maven {
-                    url("${mavenRepo.uri}")
+                    url = "${mavenRepo.uri}"
                 }
             }
         """
@@ -187,7 +189,7 @@ class PluginBuildsIntegrationTest extends AbstractPluginBuildIntegrationTest {
         def repoDeclaration = """
             repositories {
                 maven {
-                    url("${mavenRepo.uri}")
+                    url = "${mavenRepo.uri}"
                 }
             }
         """
@@ -217,7 +219,7 @@ class PluginBuildsIntegrationTest extends AbstractPluginBuildIntegrationTest {
         def repoDeclaration = """
             repositories {
                 maven {
-                    url("${mavenRepo.uri}")
+                    url = "${mavenRepo.uri}"
                 }
             }
         """
@@ -247,7 +249,7 @@ class PluginBuildsIntegrationTest extends AbstractPluginBuildIntegrationTest {
         def repoDeclaration = """
             repositories {
                 maven {
-                    url("${mavenRepo.uri}")
+                    url = "${mavenRepo.uri}"
                 }
             }
         """
@@ -290,6 +292,8 @@ class PluginBuildsIntegrationTest extends AbstractPluginBuildIntegrationTest {
     }
 
     def "included plugin build is not visible as library component"() {
+        def fixture = new ResolveFailureTestFixture(buildFile)
+
         given:
         def build = pluginAndLibraryBuild("included-build")
         settingsFile << """
@@ -306,16 +310,12 @@ class PluginBuildsIntegrationTest extends AbstractPluginBuildIntegrationTest {
             dependencies {
                 conf("${build.group}:${build.buildName}")
             }
-            tasks.register('resolve') {
-                doLast {
-                    configurations.conf.files()
-                }
-            }
         """
+        fixture.prepare("conf")
 
         then:
-        fails("resolve")
-        failureDescriptionContains("Execution failed for task ':resolve'.")
+        fails("checkDeps")
+        fixture.assertFailurePresent(failure)
         failureCauseContains("Cannot resolve external dependency com.example:included-build")
     }
 

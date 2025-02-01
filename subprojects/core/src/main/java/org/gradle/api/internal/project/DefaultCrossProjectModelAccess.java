@@ -16,8 +16,16 @@
 
 package org.gradle.api.internal.project;
 
+import org.gradle.api.Project;
+import org.gradle.api.internal.GradleInternal;
+import org.gradle.api.internal.tasks.TaskDependencyUsageTracker;
+import org.gradle.execution.taskgraph.TaskExecutionGraphInternal;
+import org.gradle.internal.metaobject.DynamicObject;
+
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 public class DefaultCrossProjectModelAccess implements CrossProjectModelAccess {
     private final ProjectRegistry<ProjectInternal> projectRegistry;
@@ -37,6 +45,16 @@ public class DefaultCrossProjectModelAccess implements CrossProjectModelAccess {
     }
 
     @Override
+    public Map<String, Project> getChildProjects(ProjectInternal referrer, ProjectInternal relativeTo) {
+        return relativeTo.getChildProjectsUnchecked().entrySet().stream().collect(
+            Collectors.toMap(
+                Map.Entry::getKey,
+                entry -> access(referrer, (ProjectInternal) entry.getValue())
+            )
+        );
+    }
+
+    @Override
     public Set<? extends ProjectInternal> getSubprojects(ProjectInternal referrer, ProjectInternal relativeTo) {
         return new TreeSet<>(projectRegistry.getSubProjects(relativeTo.getPath()));
     }
@@ -44,5 +62,26 @@ public class DefaultCrossProjectModelAccess implements CrossProjectModelAccess {
     @Override
     public Set<? extends ProjectInternal> getAllprojects(ProjectInternal referrer, ProjectInternal relativeTo) {
         return new TreeSet<>(projectRegistry.getAllProjects(relativeTo.getPath()));
+    }
+
+    @Override
+    public GradleInternal gradleInstanceForProject(ProjectInternal referrerProject, GradleInternal gradle) {
+        return gradle;
+    }
+
+    @Override
+    public TaskDependencyUsageTracker taskDependencyUsageTracker(ProjectInternal referrerProject) {
+        return null;
+    }
+
+    @Override
+    public TaskExecutionGraphInternal taskGraphForProject(ProjectInternal referrerProject, TaskExecutionGraphInternal taskGraph) {
+        return taskGraph;
+    }
+
+    @Override
+    public DynamicObject parentProjectDynamicInheritedScope(ProjectInternal referrerProject) {
+        ProjectInternal parent = referrerProject.getParent();
+        return parent != null ? parent.getInheritedScope() : null;
     }
 }

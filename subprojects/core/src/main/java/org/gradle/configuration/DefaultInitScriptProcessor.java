@@ -19,6 +19,7 @@ import org.gradle.api.initialization.dsl.ScriptHandler;
 import org.gradle.api.internal.GradleInternal;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
 import org.gradle.api.internal.initialization.ScriptHandlerFactory;
+import org.gradle.api.internal.initialization.StandaloneDomainObjectContext;
 import org.gradle.groovy.scripts.ScriptSource;
 import org.gradle.internal.id.IdGenerator;
 import org.gradle.internal.id.LongIdGenerator;
@@ -44,8 +45,8 @@ public class DefaultInitScriptProcessor implements InitScriptProcessor {
         ClassLoaderScope baseScope = gradle.getClassLoaderScope();
         URI uri = initScript.getResource().getLocation().getURI();
         String id = uri == null ? idGenerator.generateId().toString() : uri.toString();
-        ClassLoaderScope scriptScope = baseScope.createChild("init-" + id);
-        ScriptHandler scriptHandler = scriptHandlerFactory.create(initScript, scriptScope);
+        ClassLoaderScope scriptScope = baseScope.createChild("init-" + id, null);
+        ScriptHandler scriptHandler = scriptHandlerFactory.create(initScript, scriptScope, StandaloneDomainObjectContext.forScript(initScript));
         ScriptPlugin configurer = configurerFactory.create(initScript, scriptHandler, scriptScope, baseScope, true);
         configurer.apply(gradle);
     }

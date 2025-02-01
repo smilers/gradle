@@ -15,29 +15,43 @@
  */
 package org.gradle.internal.scripts;
 
-import org.gradle.scripts.ScriptingLanguage;
-
+import javax.annotation.Nullable;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
 import static java.util.Collections.emptyList;
-
 import static org.gradle.internal.FileUtils.hasExtension;
 
 public class DefaultScriptFileResolver implements ScriptFileResolver {
 
-    private static final String[] EXTENSIONS = scriptingLanguageExtensions();
+    private static final String[] EXTENSIONS = ScriptFileUtil.getValidExtensions();
+
+    @Nullable
+    private final ScriptFileResolvedListener scriptFileResolvedListener;
+
+    public DefaultScriptFileResolver(@Nullable ScriptFileResolvedListener scriptFileResolvedListener) {
+        this.scriptFileResolvedListener = scriptFileResolvedListener;
+    }
+
+    public DefaultScriptFileResolver() {
+        this.scriptFileResolvedListener = null;
+    }
 
     @Override
     public File resolveScriptFile(File dir, String basename) {
         for (String extension : EXTENSIONS) {
             File candidate = new File(dir, basename + extension);
-            if (candidate.isFile()) {
+            if (isCandidateFile(candidate)) {
                 return candidate;
             }
         }
         return null;
+    }
+
+    private boolean isCandidateFile(File candidate) {
+        notifyListener(candidate);
+        return candidate.isFile();
     }
 
     @Override
@@ -55,6 +69,13 @@ public class DefaultScriptFileResolver implements ScriptFileResolver {
         return found;
     }
 
+
+    private void notifyListener(File scriptFile) {
+        if (scriptFileResolvedListener != null) {
+            scriptFileResolvedListener.onScriptFileResolved(scriptFile);
+        }
+    }
+
     private boolean hasScriptExtension(File file) {
         for (String extension : EXTENSIONS) {
             if (hasExtension(file, extension)) {
@@ -62,14 +83,5 @@ public class DefaultScriptFileResolver implements ScriptFileResolver {
             }
         }
         return false;
-    }
-
-    private static String[] scriptingLanguageExtensions() {
-        List<ScriptingLanguage> scriptingLanguages = ScriptingLanguages.all();
-        String[] extensions = new String[scriptingLanguages.size()];
-        for (int i = 0; i < extensions.length; i++) {
-            extensions[i] = scriptingLanguages.get(i).getExtension();
-        }
-        return extensions;
     }
 }

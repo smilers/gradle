@@ -15,7 +15,7 @@
  */
 package org.gradle.api.tasks.bundling;
 
-import org.apache.tools.zip.ZipOutputStream;
+import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.internal.DocumentationRegistry;
 import org.gradle.api.internal.file.archive.ZipCopyAction;
@@ -25,6 +25,7 @@ import org.gradle.api.internal.file.copy.ZipCompressor;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.Optional;
+import org.gradle.internal.instrumentation.api.annotations.ToBeReplacedByLazyProperty;
 import org.gradle.work.DisableCachingByDefault;
 
 import javax.annotation.Nullable;
@@ -36,7 +37,7 @@ import java.nio.charset.Charset;
  * The default is to compress the contents of the zip.
  */
 @DisableCachingByDefault(because = "Not worth caching")
-public class Zip extends AbstractArchiveTask {
+public abstract class Zip extends AbstractArchiveTask {
     public static final String ZIP_EXTENSION = "zip";
     private ZipEntryCompression entryCompression = ZipEntryCompression.DEFLATED;
     private boolean allowZip64;
@@ -51,9 +52,9 @@ public class Zip extends AbstractArchiveTask {
     protected ZipCompressor getCompressor() {
         switch (entryCompression) {
             case DEFLATED:
-                return new DefaultZipCompressor(allowZip64, ZipOutputStream.DEFLATED);
+                return new DefaultZipCompressor(allowZip64, ZipArchiveOutputStream.DEFLATED);
             case STORED:
-                return new DefaultZipCompressor(allowZip64, ZipOutputStream.STORED);
+                return new DefaultZipCompressor(allowZip64, ZipArchiveOutputStream.STORED);
             default:
                 throw new IllegalArgumentException(String.format("Unknown Compression type %s", entryCompression));
         }
@@ -72,6 +73,7 @@ public class Zip extends AbstractArchiveTask {
      * @return the compression level of the archive contents.
      */
     @Input
+    @ToBeReplacedByLazyProperty
     public ZipEntryCompression getEntryCompression() {
         return entryCompression;
     }
@@ -107,6 +109,7 @@ public class Zip extends AbstractArchiveTask {
      * This means you should not enable this property if you are building JARs to be used with Java 6 and earlier runtimes.
      */
     @Input
+    @ToBeReplacedByLazyProperty
     public boolean isZip64() {
         return allowZip64;
     }
@@ -118,6 +121,7 @@ public class Zip extends AbstractArchiveTask {
      * @return null if using the platform's default character set for ZIP metadata
      * @since 2.14
      */
+    @ToBeReplacedByLazyProperty
     @Nullable @Optional @Input
     public String getMetadataCharset() {
         return this.metadataCharset;

@@ -18,15 +18,14 @@ package org.gradle.configuration;
 
 import org.gradle.api.initialization.dsl.ScriptHandler;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
-import org.gradle.configuration.internal.UserCodeApplicationContext;
 import org.gradle.groovy.scripts.ScriptSource;
+import org.gradle.groovy.scripts.internal.ScriptSourceListener;
 import org.gradle.internal.UncheckedException;
-import org.gradle.internal.operations.BuildOperationExecutor;
+import org.gradle.internal.code.UserCodeApplicationContext;
+import org.gradle.internal.operations.BuildOperationRunner;
 import org.gradle.internal.reflect.Instantiator;
 import org.gradle.internal.scripts.ScriptingLanguages;
 import org.gradle.scripts.ScriptingLanguage;
-
-import java.util.List;
 
 /**
  * Selects a {@link ScriptPluginFactory} suitable for handling a given build script based
@@ -81,28 +80,37 @@ public class ScriptPluginFactorySelector implements ScriptPluginFactory {
 
     private final ScriptPluginFactory defaultScriptPluginFactory;
     private final ProviderInstantiator providerInstantiator;
-    private final BuildOperationExecutor buildOperationExecutor;
+    private final BuildOperationRunner buildOperationRunner;
     private final UserCodeApplicationContext userCodeApplicationContext;
+    private final ScriptSourceListener scriptSourceListener;
 
-    public ScriptPluginFactorySelector(ScriptPluginFactory defaultScriptPluginFactory,
-                                       ProviderInstantiator providerInstantiator,
-                                       BuildOperationExecutor buildOperationExecutor, UserCodeApplicationContext userCodeApplicationContext) {
+    public ScriptPluginFactorySelector(
+        ScriptPluginFactory defaultScriptPluginFactory,
+        ProviderInstantiator providerInstantiator,
+        BuildOperationRunner buildOperationRunner,
+        UserCodeApplicationContext userCodeApplicationContext,
+        ScriptSourceListener scriptSourceListener
+    ) {
         this.defaultScriptPluginFactory = defaultScriptPluginFactory;
         this.providerInstantiator = providerInstantiator;
-        this.buildOperationExecutor = buildOperationExecutor;
+        this.buildOperationRunner = buildOperationRunner;
         this.userCodeApplicationContext = userCodeApplicationContext;
+        this.scriptSourceListener = scriptSourceListener;
     }
 
     @Override
-    public ScriptPlugin create(ScriptSource scriptSource, ScriptHandler scriptHandler, ClassLoaderScope targetScope,
-                               ClassLoaderScope baseScope, boolean topLevelScript) {
+    public ScriptPlugin create(
+        ScriptSource scriptSource, ScriptHandler scriptHandler, ClassLoaderScope targetScope,
+        ClassLoaderScope baseScope, boolean topLevelScript
+    ) {
+        scriptSourceListener.scriptSourceObserved(scriptSource);
         ScriptPlugin scriptPlugin = scriptPluginFactoryFor(scriptSource.getFileName())
             .create(scriptSource, scriptHandler, targetScope, baseScope, topLevelScript);
-        return new BuildOperationScriptPlugin(scriptPlugin, buildOperationExecutor, userCodeApplicationContext);
+        return new BuildOperationScriptPlugin(scriptPlugin, buildOperationRunner, userCodeApplicationContext);
     }
 
     private ScriptPluginFactory scriptPluginFactoryFor(String fileName) {
-        for (ScriptingLanguage scriptingLanguage : scriptingLanguages()) {
+        for (ScriptingLanguage scriptingLanguage : ScriptingLanguages.all()) {
             if (fileName.endsWith(scriptingLanguage.getExtension())) {
                 String provider = scriptingLanguage.getProvider();
                 if (provider != null) {
@@ -112,10 +120,6 @@ public class ScriptPluginFactorySelector implements ScriptPluginFactory {
             }
         }
         return defaultScriptPluginFactory;
-    }
-
-    private List<ScriptingLanguage> scriptingLanguages() {
-        return ScriptingLanguages.all();
     }
 
     private ScriptPluginFactory instantiate(String provider) {

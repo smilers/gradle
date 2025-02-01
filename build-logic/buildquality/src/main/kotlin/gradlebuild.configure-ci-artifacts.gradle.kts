@@ -14,40 +14,34 @@
  * limitations under the License.
  */
 import gradlebuild.basics.BuildEnvironment
-import gradlebuild.classycle.tasks.Classycle
-import gradlebuild.cleanup.tasks.KillLeakingJavaProcesses
 import gradlebuild.docs.FindBrokenInternalLinks
 import gradlebuild.integrationtests.tasks.DistributionTest
 import gradlebuild.performance.tasks.PerformanceTest
 import gradlebuild.testcleanup.extension.TestFilesCleanupBuildServiceRootExtension
-import me.champeau.gradle.japicmp.JapicmpTask
-import org.jlleitschuh.gradle.ktlint.tasks.GenerateReportsTask
+import gradlebuild.binarycompatibility.JapicmpTask
 
 if (BuildEnvironment.isCiServer && project.name != "gradle-kotlin-dsl-accessors") {
     val globalExtension = rootProject.extensions.getByType<TestFilesCleanupBuildServiceRootExtension>()
     project.gradle.taskGraph.whenReady {
         val allTasks = this@whenReady.allTasks
-        globalExtension.cleanupRunnerStep.set(allTasks.filterIsInstance<KillLeakingJavaProcesses>().isNotEmpty())
         val taskPathToReports = allTasks.associate { it.path to it.customReports() + it.attachedReportLocations() }.filter { it.value.isNotEmpty() }
-        globalExtension.taskPathToReports.set(taskPathToReports)
+        globalExtension.taskPathToReports = taskPathToReports
     }
 }
 
 fun Task.customReports(): List<File> = when (this) {
     is ValidatePlugins -> listOf(outputFile.get().asFile)
-    is Classycle -> listOf(reportFile.get().asFile)
     is FindBrokenInternalLinks -> listOf(reportFile.get().asFile)
     is DistributionTest -> listOf(
         gradleInstallationForTest.gradleUserHomeDir.dir("test-kit-daemon").get().asFile,
         gradleInstallationForTest.gradleUserHomeDir.dir("kotlin-compiler-daemon").get().asFile,
         gradleInstallationForTest.daemonRegistry.get().asFile
     )
-    is GenerateReportsTask -> listOf(reportsOutputDirectory.get().asFile)
     else -> emptyList()
 }
 
 fun Task.attachedReportLocations() = when (this) {
-    is JapicmpTask -> listOf(richReport.destinationDir.resolve(richReport.reportName))
+    is JapicmpTask -> listOf(richReport.get().destinationDir.get().asFile.resolve(richReport.get().reportName.get()))
     is PerformanceTest -> listOf(reportDir.parentFile)
     else -> emptyList()
 }

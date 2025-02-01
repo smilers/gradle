@@ -19,11 +19,11 @@ package promotion
 import common.BuildToolBuildJvm
 import common.Os
 import common.paramsForBuildToolBuild
-import common.requiresNoEc2Agent
+import common.requiresNotEc2Agent
 import common.requiresOs
-import jetbrains.buildServer.configs.kotlin.v2019_2.AbsoluteId
-import jetbrains.buildServer.configs.kotlin.v2019_2.BuildType
-import jetbrains.buildServer.configs.kotlin.v2019_2.CheckoutMode
+import jetbrains.buildServer.configs.kotlin.AbsoluteId
+import jetbrains.buildServer.configs.kotlin.BuildType
+import jetbrains.buildServer.configs.kotlin.CheckoutMode
 
 abstract class BasePromotionBuildType(vcsRootId: String, cleanCheckout: Boolean = true) : BuildType() {
     init {
@@ -37,13 +37,13 @@ abstract class BasePromotionBuildType(vcsRootId: String, cleanCheckout: Boolean 
 
         requirements {
             requiresOs(Os.LINUX)
-            requiresNoEc2Agent()
+            requiresNotEc2Agent()
         }
 
         paramsForBuildToolBuild(BuildToolBuildJvm, Os.LINUX)
 
         params {
-            password("env.GRADLE_ENTERPRISE_ACCESS_KEY", "%ge.gradle.org.access.key%;%e.grdev.net.access.key%")
+            password("env.DEVELOCITY_ACCESS_KEY", "%ge.gradle.org.access.key%;%develocity.grdev.net.access.key%")
             password("env.ORG_GRADLE_PROJECT_botGradleGitHubToken", "%github.bot-gradle.token%")
         }
 

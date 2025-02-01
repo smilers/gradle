@@ -17,10 +17,12 @@
 package org.gradle.api;
 
 import groovy.lang.Closure;
+import groovy.lang.DelegatesTo;
 import groovy.lang.MissingPropertyException;
+import groovy.transform.stc.ClosureParams;
+import groovy.transform.stc.SimpleType;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.LoggingManager;
-import org.gradle.api.plugins.Convention;
 import org.gradle.api.plugins.ExtensionAware;
 import org.gradle.api.provider.Property;
 import org.gradle.api.provider.Provider;
@@ -34,6 +36,7 @@ import org.gradle.api.tasks.TaskInputs;
 import org.gradle.api.tasks.TaskLocalState;
 import org.gradle.api.tasks.TaskOutputs;
 import org.gradle.api.tasks.TaskState;
+import org.gradle.internal.deprecation.DeprecationLogger;
 
 import javax.annotation.Nullable;
 import java.io.File;
@@ -61,7 +64,7 @@ import java.util.Set;
  * and the task's name. Path elements are separated using the {@value org.gradle.api.Project#PATH_SEPARATOR}
  * character.</p>
  *
- * <h3>Task Actions</h3>
+ * <h2>Task Actions</h2>
  *
  * <p>A <code>Task</code> is made up of a sequence of {@link Action} objects. When the task is executed, each of the
  * actions is executed in turn, by calling {@link Action#execute}. You can add actions to a task by calling {@link
@@ -77,7 +80,7 @@ import java.util.Set;
  * next task by throwing a {@link org.gradle.api.tasks.StopExecutionException}. Using these exceptions allows you to
  * have precondition actions which skip execution of the task, or part of the task, if not true.</p>
  *
- * <a name="dependencies"></a><h3>Task Dependencies and Task Ordering</h3>
+ * <h2 id="dependencies">Task Dependencies and Task Ordering</h2>
  *
  * <p>A task may have dependencies on other tasks or might be scheduled to always run after another task.
  * Gradle ensures that all task dependencies and ordering rules are honored when executing tasks, so that the task is executed after
@@ -119,9 +122,9 @@ import java.util.Set;
  *
  * </ul>
  *
- * <h3>Using a Task in a Build File</h3>
+ * <h2>Using a Task in a Build File</h2>
  *
- * <a name="properties"></a> <h4>Dynamic Properties</h4>
+ * <h3 id="properties">Dynamic Properties</h3>
  *
  * <p>A {@code Task} has 4 'scopes' for properties. You can access these properties by name from the build file or by
  * calling the {@link #property(String)} method. You can change the value of these properties by calling the {@link #setProperty(String, Object)} method.</p>
@@ -136,7 +139,7 @@ import java.util.Set;
  * name as the extension.</li>
  *
  * <li>The <em>convention</em> properties added to the task by plugins. A plugin can add properties and methods to a task through
- * the task's {@link Convention} object.  The properties of this scope may be readable or writable, depending on the convention objects.</li>
+ * the task's {@link org.gradle.api.plugins.Convention} object.  The properties of this scope may be readable or writable, depending on the convention objects.</li>
  *
  * <li>The <em>extra properties</em> of the task. Each task object maintains a map of additional properties. These
  * are arbitrary name -&gt; value pairs which you can use to dynamically add properties to a task object.  Once defined, the properties
@@ -146,9 +149,9 @@ import java.util.Set;
  *
  * <h4>Dynamic Methods</h4>
  *
- * <p>A {@link Plugin} may add methods to a {@code Task} using its {@link Convention} object.</p>
+ * <p>A {@link Plugin} may add methods to a {@code Task} using its {@link org.gradle.api.plugins.Convention} object.</p>
  *
- * <h4>Parallel Execution</h4>
+ * <h3>Parallel Execution</h3>
  * <p>
  * By default, tasks are not executed in parallel unless a task is waiting on asynchronous work and another task (which
  * is not dependent) is ready to execute.
@@ -156,7 +159,7 @@ import java.util.Set;
  * Parallel execution can be enabled by the <code>--parallel</code> flag when the build is initiated.
  * In parallel mode, the tasks of different projects (i.e. in a multi project build) are able to be executed in parallel.
  */
-public interface Task extends Comparable<Task>, ExtensionAware {
+public interface Task extends Comparable<Task>, ExtensionAware, Named {
     String TASK_NAME = "name";
 
     String TASK_DESCRIPTION = "description";
@@ -184,15 +187,29 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      * @return The name of the task. Never returns null.
      */
     @Internal
+    @Override
     String getName();
 
     /**
-     * A {@link org.gradle.api.Namer} namer for tasks that returns {@link #getName()}.
+     * An implementation of the namer interface for tasks that returns {@link #getName()}.
+     *
+     * @deprecated Use {@link Named.Namer#INSTANCE} instead (since {@link Task} now extends {@link Named}).
      */
+    @Deprecated
     class Namer implements org.gradle.api.Namer<Task> {
+
+        public Namer() {
+            DeprecationLogger.deprecateType(Namer.class)
+                .replaceWith("Named.Namer.INSTANCE")
+                .withContext("Task implements Named, so you can use Named.Namer.INSTANCE instead of Task.Namer")
+                .willBeRemovedInGradle9()
+                .withUpgradeGuideSection(8, "deprecated_namers")
+                .nagUser();
+        }
+
         @Override
-        public String determineName(Task c) {
-            return c.getName();
+        public String determineName(Task task) {
+            return Named.Namer.INSTANCE.determineName(task);
         }
     }
 
@@ -241,7 +258,7 @@ public interface Task extends Comparable<Task>, ExtensionAware {
     Set<Object> getDependsOn();
 
     /**
-     * <p>Sets the dependencies of this task. See <a href="#dependencies">here</a> for a description of the types of
+     * <p>Sets the dependencies of this task. See <a href="./Task.html#dependencies">here</a> for a description of the types of
      * objects which can be used as task dependencies.</p>
      *
      * @param dependsOnTasks The set of task paths.
@@ -249,7 +266,7 @@ public interface Task extends Comparable<Task>, ExtensionAware {
     void setDependsOn(Iterable<?> dependsOnTasks);
 
     /**
-     * <p>Adds the given dependencies to this task. See <a href="#dependencies">here</a> for a description of the types
+     * <p>Adds the given dependencies to this task. See <a href="./Task.html#dependencies">here</a> for a description of the types
      * of objects which can be used as task dependencies.</p>
      *
      * @param paths The dependencies to add to this task.
@@ -269,17 +286,16 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      *
      * @param onlyIfClosure code to execute to determine if task should be run
      */
-    void onlyIf(Closure onlyIfClosure);
+    void onlyIf(Closure<?> onlyIfClosure);
 
     /**
      * Do not track the state of the task.
      *
-     * Instructs Gradle to treat the task as untracked.
+     * <p>Instructs Gradle to treat the task as untracked.
      *
      * @see org.gradle.api.tasks.UntrackedTask
      * @since 7.3
      */
-    @Incubating
     void doNotTrackState(String reasonNotToTrackState);
 
     /**
@@ -302,7 +318,6 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      *
      * @since 7.4
      */
-    @Incubating
     void notCompatibleWithConfigurationCache(String reason);
 
     /**
@@ -324,6 +339,28 @@ public interface Task extends Comparable<Task>, ExtensionAware {
     void onlyIf(Spec<? super Task> onlyIfSpec);
 
     /**
+     * <p>Execute the task only if the given spec is satisfied. The spec will be evaluated at task execution time, not
+     * during configuration. If the Spec is not satisfied, the task will be skipped.</p>
+     *
+     * <p>You may add multiple such predicates. The task is skipped if any of the predicates return false.</p>
+     *
+     * <p>Typical usage (from Java):</p>
+     * <pre>myTask.onlyIf("run only in production environment", new Spec&lt;Task&gt;() {
+     *    boolean isSatisfiedBy(Task task) {
+     *       return isProductionEnvironment();
+     *    }
+     * });
+     * </pre>
+     *
+     * @param onlyIfReason specifies the reason for a task to run, which is used for logging
+     * @param onlyIfSpec specifies if a task should be run
+     *
+     * @since 7.6
+     */
+    @Incubating
+    void onlyIf(String onlyIfReason, Spec<? super Task> onlyIfSpec);
+
+    /**
      * <p>Execute the task only if the given closure returns true.  The closure will be evaluated at task execution
      * time, not during configuration.  The closure will be passed a single parameter, this task. If the closure returns
      * false, the task will be skipped.</p>
@@ -332,7 +369,7 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      *
      * @param onlyIfClosure code to execute to determine if task should be run
      */
-    void setOnlyIf(Closure onlyIfClosure);
+    void setOnlyIf(Closure<?> onlyIfClosure);
 
     /**
      * <p>Execute the task only if the given spec is satisfied. The spec will be evaluated at task execution time, not
@@ -343,6 +380,20 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      * @param onlyIfSpec specifies if a task should be run
      */
     void setOnlyIf(Spec<? super Task> onlyIfSpec);
+
+    /**
+     * <p>Execute the task only if the given spec is satisfied. The spec will be evaluated at task execution time, not
+     * during configuration. If the Spec is not satisfied, the task will be skipped.</p>
+     *
+     * <p>The given predicate replaces all such predicates for this task.</p>
+     *
+     * @param onlyIfReason specifies the reason for a task to run, which is used for logging
+     * @param onlyIfSpec specifies if a task should be run
+     *
+     * @since 7.6
+     */
+    @Incubating
+    void setOnlyIf(String onlyIfReason, Spec<? super Task> onlyIfSpec);
 
     /**
      * Returns the execution state of this task. This provides information about the execution of this task, such as
@@ -394,7 +445,9 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      * @param action The action closure to execute.
      * @return This task.
      */
-    Task doFirst(Closure action);
+    Task doFirst(@DelegatesTo(Task.class)
+                 @ClosureParams(value = SimpleType.class, options = "org.gradle.api.Task")
+                 Closure action);
 
     /**
      * <p>Adds the given {@link Action} to the beginning of this task's action list.</p>
@@ -433,7 +486,9 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      * @param action The action closure to execute.
      * @return This task.
      */
-    Task doLast(Closure action);
+    Task doLast(@DelegatesTo(Task.class)
+                @ClosureParams(value = SimpleType.class, options = "org.gradle.api.Task")
+                Closure action);
 
     /**
      * <p>Returns if this task is enabled or not.</p>
@@ -542,7 +597,7 @@ public interface Task extends Comparable<Task>, ExtensionAware {
     void setProperty(String name, Object value) throws MissingPropertyException;
 
     /**
-     * <p>Returns the {@link Convention} object for this task. A {@link Plugin} can use the convention object to
+     * <p>Returns the {@link org.gradle.api.plugins.Convention} object for this task. A {@link Plugin} can use the convention object to
      * contribute properties and methods to this task.</p>
      *
      * @return The convention object. Never returns null.
@@ -551,7 +606,7 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      */
     @Internal
     @Deprecated
-    Convention getConvention();
+    org.gradle.api.plugins.Convention getConvention();
 
     /**
      * Returns the description of this task.
@@ -643,7 +698,7 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      * <p>For each supplied task, this action adds a task 'ordering', and does not specify a 'dependency' between the tasks.
      * As such, it is still possible to execute 'taskY' without first executing the 'taskX' in the example.</p>
      *
-     * <p>See <a href="#dependencies">here</a> for a description of the types of objects which can be used to specify
+     * <p>See <a href="./Task.html#dependencies">here</a> for a description of the types of objects which can be used to specify
      * an ordering relationship.</p>
      *
      * @param paths The tasks this task must run after.
@@ -664,7 +719,7 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      * <p>For each supplied task, this action adds a task 'ordering', and does not specify a 'dependency' between the tasks.
      * As such, it is still possible to execute 'taskY' without first executing the 'taskX' in the example.</p>
      *
-     * <p>See <a href="#dependencies">here</a> for a description of the types of objects which can be used to specify
+     * <p>See <a href="./Task.html#dependencies">here</a> for a description of the types of objects which can be used to specify
      * an ordering relationship.</p>
      *
      * @param mustRunAfter The set of task paths this task must run after.
@@ -688,7 +743,7 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      * }
      * </pre>
      *
-     * <p>See <a href="#dependencies">here</a> for a description of the types of objects which can be used to specify
+     * <p>See <a href="./Task.html#dependencies">here</a> for a description of the types of objects which can be used to specify
      * a finalizer task.</p>
      *
      * @param paths The tasks that finalize this task.
@@ -706,7 +761,7 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      * }
      * </pre>
      *
-     * <p>See <a href="#dependencies">here</a> for a description of the types of objects which can be used to specify
+     * <p>See <a href="./Task.html#dependencies">here</a> for a description of the types of objects which can be used to specify
      * a finalizer task.</p>
      *
      * @param finalizedBy The tasks that finalize this task.
@@ -733,7 +788,7 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      * <p>For each supplied task, this action adds a task 'ordering', and does not specify a 'dependency' between the tasks.
      * As such, it is still possible to execute 'taskY' without first executing the 'taskX' in the example.</p>
      *
-     * <p>See <a href="#dependencies">here</a> for a description of the types of objects which can be used to specify
+     * <p>See <a href="./Task.html#dependencies">here</a> for a description of the types of objects which can be used to specify
      * an ordering relationship.</p>
      *
      * @param paths The tasks this task should run after.
@@ -754,7 +809,7 @@ public interface Task extends Comparable<Task>, ExtensionAware {
      * <p>For each supplied task, this action adds a task 'ordering', and does not specify a 'dependency' between the tasks.
      * As such, it is still possible to execute 'taskY' without first executing the 'taskX' in the example.</p>
      *
-     * <p>See <a href="#dependencies">here</a> for a description of the types of objects which can be used to specify
+     * <p>See <a href="./Task.html#dependencies">here</a> for a description of the types of objects which can be used to specify
      * an ordering relationship.</p>
      *
      * @param shouldRunAfter The set of task paths this task should run after.
@@ -792,10 +847,13 @@ public interface Task extends Comparable<Task>, ExtensionAware {
     /**
      * Registers a {@link BuildService} that is used by this task so
      * {@link BuildServiceRegistration#getMaxParallelUsages() its constraint on parallel execution} can be honored.
+     * <p>
+     * This is not necessary for task properties declared as {@link org.gradle.api.services.ServiceReference}s.
+     * </p>
      *
      * @param service The service provider.
      * @since 6.1
+     * @see org.gradle.api.services.ServiceReference
      */
-    @Incubating
     void usesService(Provider<? extends BuildService<?>> service);
 }

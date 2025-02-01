@@ -26,6 +26,7 @@ import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.util.PatternFilterable;
 import org.gradle.api.tasks.util.PatternSet;
 import org.gradle.internal.Factory;
+import org.gradle.internal.instrumentation.api.annotations.ToBeReplacedByLazyProperty;
 import org.gradle.work.DisableCachingByDefault;
 
 import javax.inject.Inject;
@@ -36,7 +37,7 @@ import java.util.Set;
  */
 @NonNullApi
 @DisableCachingByDefault(because = "Super-class, not to be instantiated directly")
-public class SourceTask extends ConventionTask implements PatternFilterable {
+public abstract class SourceTask extends ConventionTask implements PatternFilterable {
     private ConfigurableFileCollection sourceFiles = getProject().getObjects().fileCollection();
     private final PatternFilterable patternSet;
 
@@ -67,6 +68,7 @@ public class SourceTask extends ConventionTask implements PatternFilterable {
     @InputFiles
     @SkipWhenEmpty
     @IgnoreEmptyDirectories
+    @ToBeReplacedByLazyProperty
     @PathSensitive(PathSensitivity.ABSOLUTE)
     public FileTree getSource() {
         return sourceFiles.getAsFileTree().matching(patternSet);
@@ -179,6 +181,7 @@ public class SourceTask extends ConventionTask implements PatternFilterable {
      */
     @Override
     @Internal
+    @ToBeReplacedByLazyProperty
     public Set<String> getIncludes() {
         return patternSet.getIncludes();
     }
@@ -197,6 +200,7 @@ public class SourceTask extends ConventionTask implements PatternFilterable {
      */
     @Override
     @Internal
+    @ToBeReplacedByLazyProperty
     public Set<String> getExcludes() {
         return patternSet.getExcludes();
     }

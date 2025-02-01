@@ -17,28 +17,32 @@
 package gradlebuild.performance.tasks
 
 import gradlebuild.basics.kotlindsl.execAndGetStdout
-import gradlebuild.identity.extension.ModuleIdentityExtension
 import org.gradle.api.DefaultTask
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.TaskAction
-import org.gradle.internal.os.OperatingSystem
+// Using star import to workaround https://youtrack.jetbrains.com/issue/KTIJ-24390
 import org.gradle.kotlin.dsl.*
+import org.gradle.process.ExecOperations
 import org.gradle.work.DisableCachingByDefault
 import javax.inject.Inject
 
 
-const val defaultBaseline = "defaults"
+const val FLAKINESS_DETECTION_COMMIT_BASELINE = "flakiness-detection-commit"
 
 
-const val forceDefaultBaseline = "force-defaults"
+interface CommandExecutor {
+    fun execAndGetStdout(vararg args: String): String
+}
 
 
-const val flakinessDetectionCommitBaseline = "flakiness-detection-commit"
+open class DefaultCommandExecutor @Inject constructor(private val exec: ExecOperations) : CommandExecutor {
+    override fun execAndGetStdout(vararg args: String): String = exec.execAndGetStdout(*args)
+}
 
 
 @DisableCachingByDefault(because = "Not worth caching")
-abstract class DetermineBaselines @Inject constructor(@get:Internal val distributed: Boolean) : DefaultTask() {
+abstract class DetermineBaselines @Inject constructor(@get:Internal val distributed: Boolean, @get:Internal val commandExecutor: CommandExecutor) : DefaultTask() {
 
     @get:Internal
     abstract val configuredBaselines: Property<String>
@@ -46,18 +50,28 @@ abstract class DetermineBaselines @Inject constructor(@get:Internal val distribu
     @get:Internal
     abstract val determinedBaselines: Property<String>
 
+    @get:Internal
+    abstract val defaultBaselines: Property<String>
+
+    @get:Internal
+    abstract val logicalBranch: Property<String>
+
+    @get:Inject
+    protected abstract val execOperations: ExecOperations
+
     @TaskAction
     fun determineForkPointCommitBaseline() {
-        if (configuredBaselines.getOrElse("") == forceDefaultBaseline) {
-            determinedBaselines.set(defaultBaseline)
-        } else if (configuredBaselines.getOrElse("") == flakinessDetectionCommitBaseline) {
-            determinedBaselines.set(determineFlakinessDetectionBaseline())
-        } else if (!currentBranchIsMasterOrRelease() && !OperatingSystem.current().isWindows && configuredBaselines.isDefaultValue()) {
-            // Windows git complains "long path" so we don't build commit distribution on Windows
-            determinedBaselines.set(forkPointCommitBaseline())
+        if (configuredBaselines.getOrElse("") == FLAKINESS_DETECTION_COMMIT_BASELINE) {
+            determinedBaselines = determineFlakinessDetectionBaseline()
+        } else if (configuredBaselines.getOrElse("").isNotEmpty()) {
+            determinedBaselines = configuredBaselines
+        } else if (currentBranchIsMasterOrRelease() || isSecurityAdvisoryFork()) {
+            determinedBaselines = defaultBaselines
         } else {
-            determinedBaselines.set(configuredBaselines)
+            determinedBaselines = forkPointCommitBaseline()
         }
+
+        println("Determined baseline is: ${determinedBaselines.get()}")
     }
 
     /**
@@ -67,25 +81,27 @@ abstract class DetermineBaselines @Inject constructor(@get:Internal val distribu
      * @see PerformanceTest#NON_CACHEABLE_VERSIONS
      */
     private
-    fun determineFlakinessDetectionBaseline() = if (distributed) flakinessDetectionCommitBaseline else currentCommitBaseline()
+    fun determineFlakinessDetectionBaseline() = if (distributed) FLAKINESS_DETECTION_COMMIT_BASELINE else currentCommitBaseline()
 
     private
-    fun currentBranchIsMasterOrRelease() = project.the<ModuleIdentityExtension>().logicalBranch.get() in listOf("master", "release")
+    fun currentBranchIsMasterOrRelease() = logicalBranch.get() in listOf("master", "release")
 
     private
-    fun Property<String>.isDefaultValue() = !isPresent || get() in listOf("", defaultBaseline)
+    fun currentCommitBaseline() = commitBaseline(commandExecutor.execAndGetStdout("git", "rev-parse", "HEAD"))
 
     private
-    fun currentCommitBaseline() = commitBaseline(project.execAndGetStdout("git", "rev-parse", "HEAD"))
+    fun isSecurityAdvisoryFork(): Boolean = commandExecutor.execAndGetStdout("git", "remote", "-v")
+        .lines()
+        .any { it.contains("gradle/gradle-ghsa") } // ghsa = github-security-advisory
 
     private
     fun forkPointCommitBaseline(): String {
         val source = tryGetUpstream() ?: "origin"
-        project.execAndGetStdout("git", "fetch", source, "master", "release")
-        val masterForkPointCommit = project.execAndGetStdout("git", "merge-base", "origin/master", "HEAD")
-        val releaseForkPointCommit = project.execAndGetStdout("git", "merge-base", "origin/release", "HEAD")
+        commandExecutor.execAndGetStdout("git", "fetch", source, "master", "release")
+        val masterForkPointCommit = commandExecutor.execAndGetStdout("git", "merge-base", "origin/master", "HEAD")
+        val releaseForkPointCommit = commandExecutor.execAndGetStdout("git", "merge-base", "origin/release", "HEAD")
         val forkPointCommit =
-            if (project.exec { isIgnoreExitValue = true; commandLine("git", "merge-base", "--is-ancestor", masterForkPointCommit, releaseForkPointCommit) }.exitValue == 0)
+            if (execOperations.exec { isIgnoreExitValue = true; commandLine("git", "merge-base", "--is-ancestor", masterForkPointCommit, releaseForkPointCommit) }.exitValue == 0)
                 releaseForkPointCommit
             else
                 masterForkPointCommit
@@ -93,18 +109,19 @@ abstract class DetermineBaselines @Inject constructor(@get:Internal val distribu
     }
 
     private
-    fun tryGetUpstream(): String? = project.execAndGetStdout("git", "remote", "-v")
+    fun tryGetUpstream(): String? = commandExecutor.execAndGetStdout("git", "remote", "-v")
         .lines()
         .find { it.contains("git@github.com:gradle/gradle.git") || it.contains("https://github.com/gradle/gradle.git") }
         .let {
+            // origin	https://github.com/gradle/gradle.git (fetch)
             val str = it?.replace(Regex("\\s+"), " ")
             return str?.substring(0, str.indexOf(' '))
         }
 
     private
     fun commitBaseline(commit: String): String {
-        val baseVersionOnForkPoint = project.execAndGetStdout("git", "show", "$commit:version.txt")
-        val shortCommitId = project.execAndGetStdout("git", "rev-parse", "--short", commit)
+        val baseVersionOnForkPoint = commandExecutor.execAndGetStdout("git", "show", "$commit:version.txt")
+        val shortCommitId = commandExecutor.execAndGetStdout("git", "rev-parse", "--short", commit)
         return "$baseVersionOnForkPoint-commit-$shortCommitId"
     }
 }

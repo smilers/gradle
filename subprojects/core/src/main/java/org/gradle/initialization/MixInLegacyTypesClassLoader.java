@@ -21,7 +21,7 @@ import groovy.lang.GroovySystem;
 import groovy.lang.MetaClass;
 import groovy.lang.MetaClassRegistry;
 import org.apache.commons.lang.StringUtils;
-import org.gradle.internal.classanalysis.AsmConstants;
+import org.gradle.model.internal.asm.AsmConstants;
 import org.gradle.internal.classloader.TransformingClassLoader;
 import org.gradle.internal.classloader.VisitableURLClassLoader;
 import org.gradle.internal.classpath.ClassPath;
@@ -123,6 +123,9 @@ public class MixInLegacyTypesClassLoader extends TransformingClassLoader {
         /**
          * We only add getters for `public static final String` constants. This is because in
          * the converted classes only contain these kinds of constants.
+         *
+         * This is a mapping of the synthesized accessor name to the name of the backing field,
+         * i.e. "getFOO" to "FOO"
          */
         private Map<String, String> missingStaticStringConstantGetters = new HashMap<String, String>();
         private Set<String> booleanGetGetters = new HashSet<String>();
@@ -145,9 +148,9 @@ public class MixInLegacyTypesClassLoader extends TransformingClassLoader {
         @Override
         public FieldVisitor visitField(int access, String name, String desc, String signature, Object value) {
             if (((access & PUBLIC_STATIC_FINAL) == PUBLIC_STATIC_FINAL) && Type.getDescriptor(String.class).equals(desc)) {
-                missingStaticStringConstantGetters.put("get" + name, (String) value);
+                missingStaticStringConstantGetters.put("get" + name, name);
             }
-            if (((access & Opcodes.ACC_PRIVATE) > 0) && !isStatic(access) && (Type.getDescriptor(boolean.class).equals(desc))) {
+            if (((access & Opcodes.ACC_PRIVATE) > 0) && !isStatic(access) && Type.getDescriptor(boolean.class).equals(desc)) {
                 booleanFields.add(name);
             }
             return super.visitField(access, name, desc, signature, value);
@@ -310,7 +313,8 @@ public class MixInLegacyTypesClassLoader extends TransformingClassLoader {
                     constant.getKey(),
                     Type.getMethodDescriptor(Type.getType(String.class)), null, null);
                 mv.visitCode();
-                mv.visitLdcInsn(constant.getValue());
+                // accommodate cases where the RHS of the String constant is a method, not a hard-coded String
+                mv.visitFieldInsn(Opcodes.GETSTATIC, className, constant.getValue(), Type.getDescriptor(String.class));
                 mv.visitInsn(Opcodes.ARETURN);
                 mv.visitMaxs(1, 0);
                 mv.visitEnd();

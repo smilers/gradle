@@ -16,8 +16,7 @@
 
 package org.gradle.api.tasks
 
-import org.gradle.util.TextUtil
-
+import org.gradle.util.internal.TextUtil
 
 class CachedLineEndingSensitivityIntegrationSpec extends AbstractLineEndingSensitivityIntegrationSpec {
     def buildCachePath = TextUtil.normaliseFileSeparators(testDirectory.file("build-cache").absolutePath)

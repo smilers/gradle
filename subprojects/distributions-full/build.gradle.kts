@@ -1,3 +1,5 @@
+import gradlebuild.basics.BuildEnvironmentExtension
+
 plugins {
     id("gradlebuild.distribution.packaging")
     id("gradlebuild.verify-build-environment")
@@ -7,28 +9,27 @@ plugins {
 description = "The collector project for the entirety of the Gradle distribution"
 
 dependencies {
-    coreRuntimeOnly(platform(project(":core-platform")))
+    coreRuntimeOnly(platform(projects.corePlatform))
 
-    pluginsRuntimeOnly(platform(project(":distributions-publishing")))
-    pluginsRuntimeOnly(platform(project(":distributions-jvm")))
-    pluginsRuntimeOnly(platform(project(":distributions-native")))
+    agentsRuntimeOnly(projects.instrumentationAgent)
 
-    pluginsRuntimeOnly(project(":plugin-development"))
-    pluginsRuntimeOnly(project(":build-init"))
-    pluginsRuntimeOnly(project(":build-profile"))
-    pluginsRuntimeOnly(project(":antlr"))
-    pluginsRuntimeOnly(project(":enterprise"))
-}
+    pluginsRuntimeOnly(platform(projects.distributionsPublishing))
+    pluginsRuntimeOnly(platform(projects.distributionsJvm))
+    pluginsRuntimeOnly(platform(projects.distributionsNative))
 
-tasks.register<gradlebuild.run.tasks.RunEmbeddedGradle>("runDevGradle") {
-    group = "verification"
-    description = "Runs an embedded Gradle using the partial distribution for ${project.path}."
-    gradleClasspath.from(configurations.runtimeClasspath.get(), tasks.runtimeApiInfoJar)
+    pluginsRuntimeOnly(projects.pluginDevelopment)
+    pluginsRuntimeOnly(projects.buildConfiguration)
+    pluginsRuntimeOnly(projects.buildInit)
+    pluginsRuntimeOnly(projects.buildProfile)
+    pluginsRuntimeOnly(projects.antlr)
+    pluginsRuntimeOnly(projects.enterprise)
+    pluginsRuntimeOnly(projects.unitTestFixtures)
 }
 
 // This is required for the separate promotion build and should be adjusted there in the future
+val buildEnvironmentExtension = extensions.getByType(BuildEnvironmentExtension::class)
 tasks.register<Copy>("copyDistributionsToRootBuild") {
     dependsOn("buildDists")
     from(layout.buildDirectory.dir("distributions"))
-    into(rootProject.layout.buildDirectory.dir("distributions"))
+    into(buildEnvironmentExtension.rootProjectBuildDir.dir("distributions"))
 }

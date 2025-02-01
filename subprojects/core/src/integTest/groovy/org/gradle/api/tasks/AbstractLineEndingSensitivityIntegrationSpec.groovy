@@ -17,19 +17,23 @@
 package org.gradle.api.tasks
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.ToBeFixedForIsolatedProjects
 import org.gradle.internal.fingerprint.LineEndingSensitivity
 import org.gradle.work.NormalizeLineEndings
 
 import java.lang.annotation.Annotation
 
-
 abstract class AbstractLineEndingSensitivityIntegrationSpec extends AbstractIntegrationSpec {
-    private static final byte[] JPG_CONTENT_WITH_LF = [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0xff, 0xda, 0x0a] as byte[]
-    private static final byte[] JPG_CONTENT_WITH_CRLF = [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0xff, 0xda, 0x0d, 0x0a] as byte[]
-    private static final byte[] CLASS_FILE_WITH_LF = [0xca, 0xfe, 0xba, 0xbe, 0x00, 0x00, 0x00, 0x37, 0x0a, 0x00, 0x0a] as byte[]
-    private static final byte[] CLASS_FILE_WITH_CRLF = [0xca, 0xfe, 0xba, 0xbe, 0x00, 0x00, 0x00, 0x37, 0x0a, 0x00, 0x0a, 0x0d, 0x0a] as byte[]
+    private static final byte[] BINARY_CONTENT_WITH_LF = [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0xff, 0xda, 0x0a] as byte[]
+    private static final byte[] BINARY_CONTENT_WITH_CRLF = [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0xff, 0xda, 0x0d, 0x0a] as byte[]
     public static final String TRANSFORM_EXECUTED = 'Transform producer.zip (project :producer) with AugmentTransform'
     public static final String TEXT_WITH_LINE_ENDINGS = "\nhere's a line\nhere's another line\n\n"
+
+    def setup() {
+        executer.beforeExecute {
+            requireOwnGradleUserHomeDir("Some non-incremental transforms would otherwise reuse outputs from previous builds on the same machine")
+        }
+    }
 
     abstract String getStatusForReusedOutput()
 
@@ -47,7 +51,7 @@ abstract class AbstractLineEndingSensitivityIntegrationSpec extends AbstractInte
             }
         """
         file('foo/Changing.java') << toUnix(TEXT_WITH_LINE_ENDINGS)
-        file('foo/Changing.jpg').bytes = JPG_CONTENT_WITH_LF
+        file('foo/Changing.jpg').bytes = BINARY_CONTENT_WITH_LF
 
         when:
         execute("taskWithInputs")
@@ -64,7 +68,7 @@ abstract class AbstractLineEndingSensitivityIntegrationSpec extends AbstractInte
         executedAndNotSkipped(":taskWithInputs")
 
         when:
-        file('foo/Changing.jpg').bytes = JPG_CONTENT_WITH_CRLF
+        file('foo/Changing.jpg').bytes = BINARY_CONTENT_WITH_CRLF
         cleanWorkspace()
         execute("taskWithInputs")
 
@@ -85,7 +89,7 @@ abstract class AbstractLineEndingSensitivityIntegrationSpec extends AbstractInte
             }
         """
         file('foo/Changing.java') << toUnix(TEXT_WITH_LINE_ENDINGS)
-        file('foo/Changing.jpg').bytes = JPG_CONTENT_WITH_LF
+        file('foo/Changing.jpg').bytes = BINARY_CONTENT_WITH_LF
 
         when:
         execute("taskWithInputs")
@@ -102,7 +106,7 @@ abstract class AbstractLineEndingSensitivityIntegrationSpec extends AbstractInte
         reused(":taskWithInputs")
 
         when:
-        file('foo/Changing.jpg').bytes = JPG_CONTENT_WITH_CRLF
+        file('foo/Changing.jpg').bytes = BINARY_CONTENT_WITH_CRLF
         cleanWorkspace()
         execute("taskWithInputs")
 
@@ -123,7 +127,7 @@ abstract class AbstractLineEndingSensitivityIntegrationSpec extends AbstractInte
             }
         """
         file('foo/Changing.txt') << toUnix(TEXT_WITH_LINE_ENDINGS)
-        file('foo/Changing.class').bytes = CLASS_FILE_WITH_LF
+        file('foo/Changing.jpg').bytes = BINARY_CONTENT_WITH_LF
 
         when:
         execute("taskWithInputs")
@@ -140,7 +144,7 @@ abstract class AbstractLineEndingSensitivityIntegrationSpec extends AbstractInte
         executedAndNotSkipped(":taskWithInputs")
 
         when:
-        file('foo/Changing.class').bytes = CLASS_FILE_WITH_CRLF
+        file('foo/Changing.jpg').bytes = BINARY_CONTENT_WITH_CRLF
         cleanWorkspace()
         execute("taskWithInputs")
 
@@ -161,7 +165,7 @@ abstract class AbstractLineEndingSensitivityIntegrationSpec extends AbstractInte
             }
         """
         file('foo/Changing.txt') << toUnix(TEXT_WITH_LINE_ENDINGS)
-        file('foo/Changing.class').bytes = CLASS_FILE_WITH_LF
+        file('foo/Changing.class').bytes = BINARY_CONTENT_WITH_LF
 
         when:
         execute("taskWithInputs")
@@ -178,7 +182,7 @@ abstract class AbstractLineEndingSensitivityIntegrationSpec extends AbstractInte
         reused(":taskWithInputs")
 
         when:
-        file('foo/Changing.class').bytes = CLASS_FILE_WITH_CRLF
+        file('foo/Changing.class').bytes = BINARY_CONTENT_WITH_CRLF
         cleanWorkspace()
         execute("taskWithInputs")
 
@@ -189,17 +193,21 @@ abstract class AbstractLineEndingSensitivityIntegrationSpec extends AbstractInte
         api << Api.values()
     }
 
-    def "compile classpath properties are always sensitive to line endings (#api, #lineEndingNormalization)"() {
-        createTaskWithNormalization(CompileClasspath, LineEndingSensitivity.DEFAULT, null, api)
+    def "runtime classpath properties with zip entries can ignore line endings when specified (#api)"() {
+        createTaskWithNormalization(Classpath, LineEndingSensitivity.NORMALIZE_LINE_ENDINGS, null, api)
 
         buildFile << """
+            task jarTask(type: Jar) {
+                from(project.files("foo"))
+                archiveFile.set(project.file("\${buildDir}/foo.jar"))
+            }
             taskWithInputs {
-                sources.from(project.files("foo"))
+                sources.from(jarTask)
                 outputFile = project.file("\${buildDir}/output.txt")
             }
         """
-        file('foo').mkdirs()
-        file('foo/Changing.class').bytes = CLASS_FILE_WITH_LF
+        file('foo/Changing.txt') << toUnix(TEXT_WITH_LINE_ENDINGS)
+        file('foo/Changing.jpg').bytes = BINARY_CONTENT_WITH_LF
 
         when:
         execute("taskWithInputs")
@@ -208,7 +216,15 @@ abstract class AbstractLineEndingSensitivityIntegrationSpec extends AbstractInte
         executedAndNotSkipped(":taskWithInputs")
 
         when:
-        file('foo/Changing.class').bytes = CLASS_FILE_WITH_CRLF
+        file('foo/Changing.txt').text = toWindows(TEXT_WITH_LINE_ENDINGS)
+        cleanWorkspace()
+        execute("taskWithInputs")
+
+        then:
+        reused(":taskWithInputs")
+
+        when:
+        file('foo/Changing.jpg').bytes = BINARY_CONTENT_WITH_CRLF
         cleanWorkspace()
         execute("taskWithInputs")
 
@@ -216,9 +232,56 @@ abstract class AbstractLineEndingSensitivityIntegrationSpec extends AbstractInte
         executedAndNotSkipped(":taskWithInputs")
 
         where:
-        [api, lineEndingNormalization] << [Api.values(), LineEndingSensitivity.values()].combinations()
+        api << Api.values()
     }
 
+    def "runtime classpath properties with nested zip files can ignore line endings when specified (#api)"() {
+        createTaskWithNormalization(Classpath, LineEndingSensitivity.NORMALIZE_LINE_ENDINGS, null, api)
+
+        buildFile << """
+            task zipTask(type: Zip) {
+                from(project.files("foo"))
+                archiveFile.set(project.file("\${buildDir}/foo.zip"))
+            }
+            task jarTask(type: Jar) {
+                from(zipTask)
+                archiveFile.set(project.file("\${buildDir}/foo.jar"))
+            }
+            taskWithInputs {
+                sources.from(jarTask)
+                outputFile = project.file("\${buildDir}/output.txt")
+            }
+        """
+        file('foo/Changing.txt') << toUnix(TEXT_WITH_LINE_ENDINGS)
+        file('foo/Changing.jpg').bytes = BINARY_CONTENT_WITH_LF
+
+        when:
+        execute("taskWithInputs")
+
+        then:
+        executedAndNotSkipped(":taskWithInputs")
+
+        when:
+        file('foo/Changing.txt').text = toWindows(TEXT_WITH_LINE_ENDINGS)
+        cleanWorkspace()
+        execute("taskWithInputs")
+
+        then:
+        reused(":taskWithInputs")
+
+        when:
+        file('foo/Changing.jpg').bytes = BINARY_CONTENT_WITH_CRLF
+        cleanWorkspace()
+        execute("taskWithInputs")
+
+        then:
+        executedAndNotSkipped(":taskWithInputs")
+
+        where:
+        api << Api.values()
+    }
+
+    @ToBeFixedForIsolatedProjects(because = "allprojects, extensive cross-project access")
     def "artifact transforms are sensitive to line endings by default"() {
         createParameterizedTransformWithLineEndingNormalization(LineEndingSensitivity.DEFAULT)
         file('producer/foo/bar.txt') << toUnix(TEXT_WITH_LINE_ENDINGS)
@@ -254,11 +317,12 @@ abstract class AbstractLineEndingSensitivityIntegrationSpec extends AbstractInte
         assertTransformExecuted()
     }
 
+    @ToBeFixedForIsolatedProjects(because = "allprojects, extensive cross-project access")
     def "artifact transforms can ignore line endings when specified"() {
         createParameterizedTransformWithLineEndingNormalization(LineEndingSensitivity.NORMALIZE_LINE_ENDINGS)
         file('producer/foo/bar.txt') << toUnix(TEXT_WITH_LINE_ENDINGS)
         file('inputs/baz.txt') << toUnix(TEXT_WITH_LINE_ENDINGS)
-        file('inputs/baz.jpg').bytes = JPG_CONTENT_WITH_LF
+        file('inputs/baz.jpg').bytes = BINARY_CONTENT_WITH_LF
 
         when:
         execute('showTransformedFiles')
@@ -291,7 +355,7 @@ abstract class AbstractLineEndingSensitivityIntegrationSpec extends AbstractInte
 
         when:
         cleanWorkspace()
-        file('inputs/baz.jpg').bytes = JPG_CONTENT_WITH_CRLF
+        file('inputs/baz.jpg').bytes = BINARY_CONTENT_WITH_CRLF
         execute('showTransformedFiles')
 
         then:

@@ -37,15 +37,14 @@ abstract class UpdateInitPluginTemplateVersionFile : DefaultTask() {
     val devSuffixes = arrayOf(
         "-SNAP\\d+",
         "-SNAPSHOT",
-        "-alpha-?\\d+",
-        "-beta-?\\d+",
+        "-alpha.*\\d+",
+        "-beta.*\\d+",
         "-dev-?\\d+",
         "-dev-\\d+-\\d+",
         "-rc-?\\d+",
-        "-RC-?\\d+",
         "-M.+",
         "-eap-?\\d+"
-    )
+    ).map { it.toRegex(RegexOption.IGNORE_CASE) }
 
     @get:Internal
     abstract val libraryVersionFile: RegularFileProperty
@@ -63,7 +62,7 @@ abstract class UpdateInitPluginTemplateVersionFile : DefaultTask() {
         findLatest("groovy", "org.codehaus.groovy:groovy:[3.0,4.0)", versionProperties)
         findLatest("junit", "junit:junit:(4.0,)", versionProperties)
         findLatest("junit-jupiter", "org.junit.jupiter:junit-jupiter-api:(5,)", versionProperties)
-        findLatest("testng", "org.testng:testng:(6.0,)", versionProperties)
+        findLatest("testng", "org.testng:testng:(6.0,7.6.0)", versionProperties) // TestNG 7.6.0 and above require JDK 11; see https://groups.google.com/g/testng-users/c/BAFB1vk-kok
         findLatest("slf4j", "org.slf4j:slf4j-api:(1.7,)", versionProperties)
 
         // Starting with ScalaTest 3.1.0, the third party integration were moved out of the main JAR
@@ -71,7 +70,7 @@ abstract class UpdateInitPluginTemplateVersionFile : DefaultTask() {
         findLatest("scalatestplus-junit", "org.scalatestplus:junit-4-12_${versionProperties["scala"]}:(3.1,)", versionProperties)
 
         val groovyVersion = VersionNumber.parse(versionProperties["groovy"] as String)
-        versionProperties["spock"] = "2.1-groovy-${groovyVersion.major}.${groovyVersion.minor}"
+        versionProperties["spock"] = "2.2-groovy-${groovyVersion.major}.${groovyVersion.minor}"
 
         findLatest("guava", "com.google.guava:guava:(20,)", versionProperties)
         findLatest("commons-math", "org.apache.commons:commons-math3:latest.release", versionProperties)
@@ -93,10 +92,11 @@ abstract class UpdateInitPluginTemplateVersionFile : DefaultTask() {
     private
     fun findLatest(name: String, notation: String, dest: Properties) {
         val libDependencies = arrayOf(project.dependencies.create(notation))
+        @Suppress("SpreadOperator")
         val templateVersionConfiguration = project.configurations.detachedConfiguration(*libDependencies)
         templateVersionConfiguration.resolutionStrategy.componentSelection.all {
             devSuffixes.forEach {
-                if (candidate.version.matches(".+$it\$".toRegex())) {
+                if (it.containsMatchIn(candidate.version)) {
                     reject("don't use snapshots")
                     return@forEach
                 }

@@ -20,7 +20,7 @@ import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.UnsupportedWithConfigurationCache
 
 
-@UnsupportedWithConfigurationCache
+@UnsupportedWithConfigurationCache(because = "uses task event listener")
 class TaskEventsErrorIntegrationTest extends AbstractIntegrationSpec {
     def "reports task as failed when beforeTask closure fails"() {
         when:
@@ -71,6 +71,7 @@ class TaskEventsErrorIntegrationTest extends AbstractIntegrationSpec {
     }
 """
         then:
+        executer.withArgument("--no-problems-report")
         fails('test')
         result.groupedOutput.task(":test").output == """beforeTask action
 task action

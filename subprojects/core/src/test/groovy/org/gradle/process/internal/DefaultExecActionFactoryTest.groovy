@@ -18,12 +18,13 @@ package org.gradle.process.internal
 
 import org.apache.commons.io.FileUtils
 import org.gradle.api.internal.file.TestFiles
+import org.gradle.initialization.DefaultBuildCancellationToken
 import org.gradle.internal.classloader.ClasspathUtil
 import org.gradle.process.ExecResult
 import org.gradle.test.fixtures.concurrent.ConcurrentSpec
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
-import org.gradle.util.Requires
-import org.gradle.util.TestPrecondition
+import org.gradle.test.precondition.Requires
+import org.gradle.test.preconditions.UnitTestPreconditions
 import org.gradle.util.TestUtil
 import org.junit.Rule
 
@@ -31,15 +32,19 @@ class DefaultExecActionFactoryTest extends ConcurrentSpec {
     @Rule
     public final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     def resolver = TestFiles.resolver(tmpDir.testDirectory)
+    def execHandleFactory = TestFiles.execHandleFactory(tmpDir.testDirectory)
     def fileCollectionFactory = TestFiles.fileCollectionFactory(tmpDir.testDirectory)
     def instantiator = TestUtil.instantiatorFactory()
-    def factory =
-        DefaultExecActionFactory
-            .of(resolver, fileCollectionFactory, executorFactory, TestFiles.tmpDirTemporaryFileProvider(tmpDir.root))
-            .forContext()
-            .withInstantiator(instantiator.decorateLenient())
-            .withObjectFactory(TestUtil.objectFactory())
-            .build()
+    def factory = DefaultExecActionFactory.of(
+        resolver,
+        fileCollectionFactory,
+        instantiator.decorateLenient(),
+        executorFactory,
+        TestFiles.tmpDirTemporaryFileProvider(tmpDir.createDir("tmp")),
+        new DefaultBuildCancellationToken(),
+        TestUtil.objectFactory(),
+        execHandleFactory
+    )
 
     def javaexec() {
         File testFile = tmpDir.file("someFile")
@@ -78,7 +83,7 @@ class DefaultExecActionFactoryTest extends ConcurrentSpec {
         result.exitValue != 0
     }
 
-    @Requires(TestPrecondition.NOT_WINDOWS)
+    @Requires(UnitTestPreconditions.NotWindows)
     def exec() {
         File testFile = tmpDir.file("someFile")
 
@@ -94,7 +99,7 @@ class DefaultExecActionFactoryTest extends ConcurrentSpec {
         result.exitValue == 0
     }
 
-    @Requires(TestPrecondition.NOT_WINDOWS)
+    @Requires(UnitTestPreconditions.NotWindows)
     def execWithNonZeroExitValueShouldThrowException() {
         when:
         factory.exec { spec ->
@@ -107,7 +112,7 @@ class DefaultExecActionFactoryTest extends ConcurrentSpec {
         thrown(ExecException)
     }
 
-    @Requires(TestPrecondition.NOT_WINDOWS)
+    @Requires(UnitTestPreconditions.NotWindows)
     def execWithNonZeroExitValueAndIgnoreExitValueShouldNotThrowException() {
         when:
         ExecResult result = factory.exec { spec ->

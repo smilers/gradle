@@ -23,8 +23,10 @@ import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.FileCollection
 import org.gradle.api.file.FileTree
 import org.gradle.api.file.SourceDirectorySet
+import org.gradle.api.internal.file.collections.DirectoryFileTree
 import org.gradle.api.internal.file.collections.DirectoryFileTreeFactory
 import org.gradle.api.internal.provider.ProviderInternal
+import org.gradle.api.internal.tasks.TaskDependencyFactory
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.util.PatternSet
@@ -43,15 +45,15 @@ import static org.hamcrest.CoreMatchers.equalTo
 class DefaultSourceDirectorySetTest extends Specification {
     @Rule public TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider(getClass())
     private final TestFile testDir = tmpDir.testDirectory
-    private FileResolver resolver = TestFiles.resolver(testDir)
     private FileCollectionFactory fileCollectionFactory = TestFiles.fileCollectionFactory(testDir)
+    private TaskDependencyFactory taskDependencyFactory = TestFiles.taskDependencyFactory()
     private DirectoryFileTreeFactory directoryFileTreeFactory = TestFiles.directoryFileTreeFactory()
     private ObjectFactory objectFactory = TestUtil.objectFactory()
     private org.gradle.internal.Factory<PatternSet> patternSetFactory = TestFiles.patternSetFactory
     private DefaultSourceDirectorySet set
 
     void setup() {
-        set = new DefaultSourceDirectorySet('files', '<display-name>', patternSetFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
+        set = new DefaultSourceDirectorySet('files', '<display-name>', patternSetFactory, taskDependencyFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
     }
 
     void hasUsefulToString() {
@@ -93,7 +95,7 @@ class DefaultSourceDirectorySetTest extends Specification {
     }
 
     void addsContentsOfAnotherSourceDirectorySet() {
-        SourceDirectorySet nested = new DefaultSourceDirectorySet('nested', '<nested>', patternSetFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
+        SourceDirectorySet nested = new DefaultSourceDirectorySet('nested', '<nested>', patternSetFactory, taskDependencyFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
         nested.srcDir 'dir1'
 
         when:
@@ -110,7 +112,7 @@ class DefaultSourceDirectorySetTest extends Specification {
     }
 
     void addsSourceDirectoriesOfAnotherSourceDirectorySet() {
-        SourceDirectorySet nested = new DefaultSourceDirectorySet('nested', '<nested>', patternSetFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
+        SourceDirectorySet nested = new DefaultSourceDirectorySet('nested', '<nested>', patternSetFactory, taskDependencyFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
         nested.srcDir 'dir1'
 
         when:
@@ -127,7 +129,7 @@ class DefaultSourceDirectorySetTest extends Specification {
     }
 
     void settingSourceDirsReplacesExistingContent() {
-        SourceDirectorySet nested = new DefaultSourceDirectorySet('nested', '<nested>', patternSetFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
+        SourceDirectorySet nested = new DefaultSourceDirectorySet('nested', '<nested>', patternSetFactory, taskDependencyFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
         nested.srcDir 'ignore me'
         set.srcDir 'ignore me as well'
         set.source nested
@@ -194,7 +196,7 @@ class DefaultSourceDirectorySetTest extends Specification {
     }
 
     void convertsNestedDirectorySetsToDirectoryTrees() {
-        SourceDirectorySet nested = new DefaultSourceDirectorySet('nested', '<nested>', patternSetFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
+        SourceDirectorySet nested = new DefaultSourceDirectorySet('nested', '<nested>', patternSetFactory, taskDependencyFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
         nested.srcDirs 'dir1', 'dir2'
 
         when:
@@ -208,7 +210,7 @@ class DefaultSourceDirectorySetTest extends Specification {
     }
 
     void removesDuplicateDirectoryTrees() {
-        SourceDirectorySet nested = new DefaultSourceDirectorySet('nested', '<nested>', patternSetFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
+        SourceDirectorySet nested = new DefaultSourceDirectorySet('nested', '<nested>', patternSetFactory, taskDependencyFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
         nested.srcDirs 'dir1', 'dir2'
 
         when:
@@ -240,6 +242,65 @@ class DefaultSourceDirectorySetTest extends Specification {
 
         then:
         assertSetContainsForAllTypes(set, 'subdir/file1.txt', 'subdir2/file1.txt')
+    }
+
+    void "can use patterns to filter files but not directories with getSrcDirTrees method"() {
+        File srcDir1 = new File(testDir, 'dir1')
+        touch(new File(srcDir1, 'subdir/file1.txt'))
+        touch(new File(srcDir1, 'subdir/file2.txt'))
+        File srcDir2 = new File(testDir, 'dir2')
+        touch(new File(srcDir2, 'subdir2/file1.txt'))
+        touch(new File(srcDir2, 'subdir2/file2.txt'))
+
+        when:
+        set.srcDir 'dir1'
+        set.srcDir 'dir2'
+        set.exclude 'dir1' // Dirs aren't filtered
+        set.exclude '**/file1.txt' // Files are filtered
+
+        then:
+        def trees = set.getSrcDirTrees()
+        trees.size() == 2
+        trees.collect { it.getDir() } == [srcDir1, srcDir2] // Dirs aren't filtered
+        set.getSrcDirs() == [srcDir1, srcDir2] as Set
+
+        DirectoryFileTree tree1 = set.getSrcDirTrees().first() as DirectoryFileTree
+        tree1.getDir() == srcDir1
+        assertSetContainsForAllTypes(tree1, 'subdir/file2.txt')
+
+        DirectoryFileTree tree2 = set.getSrcDirTrees().last() as DirectoryFileTree
+        tree2.getDir() == srcDir2
+        assertSetContainsForAllTypes(tree2, 'subdir2/file2.txt')
+    }
+
+    void "can use patterns to include only certain files but not directories with getSrcDirTrees method"() {
+        File srcDir1 = new File(testDir, 'dir1')
+        touch(new File(srcDir1, 'subdir/file1.txt'))
+        touch(new File(srcDir1, 'subdir2/file2.txt'))
+        touch(new File(srcDir1, 'subdir3/file3.txt'))
+        File srcDir2 = new File(testDir, 'dir2')
+        touch(new File(srcDir2, 'subdir/file1.txt'))
+        touch(new File(srcDir2, 'subdir2/file2.txt'))
+        touch(new File(srcDir1, 'subdir3/file3.txt'))
+
+        when:
+        set.srcDir 'dir1'
+        set.srcDir 'dir2'
+        set.include'**/subdir2/**' // Only include subdir2
+
+        then:
+        def trees = set.getSrcDirTrees()
+        trees.size() == 2
+        trees.collect { it.getDir() } == [srcDir1, srcDir2] // Dirs aren't filtered
+        set.getSrcDirs() == [srcDir1, srcDir2] as Set
+
+        DirectoryFileTree tree1 = set.getSrcDirTrees().first() as DirectoryFileTree
+        tree1.getDir() == srcDir1
+        assertSetContainsForAllTypes(tree1, 'subdir2/file2.txt')
+
+        DirectoryFileTree tree2 = set.getSrcDirTrees().last() as DirectoryFileTree
+        tree2.getDir() == srcDir2
+        assertSetContainsForAllTypes(tree2, 'subdir2/file2.txt')
     }
 
     void canUseFilterPatternsToFilterCertainFiles() {
@@ -315,8 +376,8 @@ class DefaultSourceDirectorySetTest extends Specification {
 
     void setAndItsViewsHaveDependenciesOfAllSourceDirectorySets() {
         given:
-        def nested1 = new DefaultSourceDirectorySet('nested-1', '<nested-1>', patternSetFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
-        def nested2 = new DefaultSourceDirectorySet('nested-2', '<nested-2>', patternSetFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
+        def nested1 = new DefaultSourceDirectorySet('nested-1', '<nested-1>', patternSetFactory, taskDependencyFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
+        def nested2 = new DefaultSourceDirectorySet('nested-2', '<nested-2>', patternSetFactory, taskDependencyFactory, fileCollectionFactory, directoryFileTreeFactory, objectFactory)
         def task1 = Stub(Task)
         def task2 = Stub(Task)
         nested1.srcDir dir("dir1", task1)
@@ -427,4 +488,3 @@ class DefaultSourceDirectorySetTest extends Specification {
         return collection
     }
 }
-

@@ -24,7 +24,7 @@ import org.gradle.internal.file.FileException;
 import org.gradle.internal.file.FileMetadata;
 import org.gradle.internal.file.FileType;
 import org.gradle.internal.file.Stat;
-import org.gradle.internal.service.scopes.Scopes;
+import org.gradle.internal.service.scopes.Scope;
 import org.gradle.internal.service.scopes.ServiceScope;
 
 import java.io.File;
@@ -36,7 +36,7 @@ import java.util.Comparator;
 /**
  * Allows the classes and resources of a classpath element such as a jar or directory to be visited.
  */
-@ServiceScope(Scopes.UserHome.class)
+@ServiceScope(Scope.UserHome.class)
 public class ClasspathWalker {
     private final Stat stat;
 
@@ -114,6 +114,20 @@ public class ClasspathWalker {
         public byte[] getContent() throws IOException {
             return entry.getContent();
         }
+
+        @Override
+        public CompressionMethod getCompressionMethod() {
+            switch (entry.getCompressionMethod()) {
+                case STORED:
+                    return CompressionMethod.STORED;
+                case DEFLATED:
+                    return CompressionMethod.DEFLATED;
+                default:
+                    // Zip entries can be in many formats but JARs are unlikely to have them as JVM doesn't
+                    // support exotic ones, and the clients mostly don't care.
+                    return CompressionMethod.UNDEFINED;
+            }
+        }
     }
 
     private static class FileEntry implements ClasspathEntryVisitor.Entry {
@@ -138,6 +152,15 @@ public class ClasspathWalker {
         @Override
         public byte[] getContent() throws IOException {
             return Files.readAllBytes(file.toPath());
+        }
+
+        @Override
+        public CompressionMethod getCompressionMethod() {
+            // One could argue that files have STORED as the compression method, as they obviously aren't compressed.
+            // However, this property is mostly an accident of the way this classpath entry was produced.
+            // Exposing it may put unnecessary burden on clients if, for example, they try to keep the compression method
+            // while repackaging entries.
+            return CompressionMethod.UNDEFINED;
         }
     }
 }

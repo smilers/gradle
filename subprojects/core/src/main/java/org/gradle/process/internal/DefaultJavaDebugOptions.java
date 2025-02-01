@@ -16,40 +16,38 @@
 
 package org.gradle.process.internal;
 
-import org.gradle.api.internal.model.InstantiatorBackedObjectFactory;
 import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.provider.Property;
-import org.gradle.internal.reflect.DirectInstantiator;
+import org.gradle.api.tasks.Optional;
 import org.gradle.process.JavaDebugOptions;
+import org.gradle.process.internal.JvmDebugSpec.DefaultJvmDebugSpec;
 
 import javax.inject.Inject;
 import java.util.Objects;
 
 public class DefaultJavaDebugOptions implements JavaDebugOptions {
     private final Property<Boolean> enabled;
+    private final Property<String> host;
     private final Property<Integer> port;
     private final Property<Boolean> server;
     private final Property<Boolean> suspend;
 
     @Inject
     public DefaultJavaDebugOptions(ObjectFactory objectFactory) {
-        this.enabled = objectFactory.property(Boolean.class).convention(false);
-        this.port = objectFactory.property(Integer.class).convention(5005);
-        this.server = objectFactory.property(Boolean.class).convention(true);
-        this.suspend = objectFactory.property(Boolean.class).convention(true);
-    }
-
-    public DefaultJavaDebugOptions() {
-        // Ugly, but there are a few places where we need to instantiate a JavaDebugOptions and a regular ObjectFactory service
-        // is not available.
-        this(new InstantiatorBackedObjectFactory(DirectInstantiator.INSTANCE));
+        DefaultJvmDebugSpec defaultValues = new DefaultJvmDebugSpec();
+        this.enabled = objectFactory.property(Boolean.class).convention(defaultValues.isEnabled());
+        this.host = objectFactory.property(String.class).convention(defaultValues.getHost());
+        this.port = objectFactory.property(Integer.class).convention(defaultValues.getPort());
+        this.server = objectFactory.property(Boolean.class).convention(defaultValues.isServer());
+        this.suspend = objectFactory.property(Boolean.class).convention(defaultValues.isSuspend());
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(getEnabled().get(), getPort().get(), getServer().get(), getSuspend().get());
+        return Objects.hash(getEnabled().get(), getHost().getOrNull(), getPort().get(), getServer().get(), getSuspend().get());
     }
 
+    @SuppressWarnings("BoxedPrimitiveEquality")
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -60,14 +58,21 @@ public class DefaultJavaDebugOptions implements JavaDebugOptions {
         }
         DefaultJavaDebugOptions that = (DefaultJavaDebugOptions) o;
         return enabled.get() == that.enabled.get()
-                && port.get().equals(that.port.get())
-                && server.get()  == that.server.get()
-                && suspend.get()  == that.suspend.get();
+            && Objects.equals(host.getOrNull(), that.host.getOrNull())
+            && port.get().equals(that.port.get())
+            && server.get() == that.server.get()
+            && suspend.get() == that.suspend.get();
     }
 
     @Override
     public Property<Boolean> getEnabled() {
         return enabled;
+    }
+
+    @Override
+    @Optional
+    public Property<String> getHost() {
+        return host;
     }
 
     @Override

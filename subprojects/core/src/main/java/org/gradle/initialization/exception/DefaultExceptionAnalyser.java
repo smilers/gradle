@@ -19,29 +19,25 @@ import org.gradle.api.GradleScriptException;
 import org.gradle.api.ProjectConfigurationException;
 import org.gradle.api.tasks.TaskExecutionException;
 import org.gradle.groovy.scripts.ScriptCompilationException;
-import org.gradle.groovy.scripts.ScriptSource;
-import org.gradle.internal.event.ListenerManager;
 import org.gradle.internal.exceptions.Contextual;
 import org.gradle.internal.exceptions.LocationAwareException;
-import org.gradle.internal.scripts.ScriptExecutionListener;
 import org.gradle.internal.service.ServiceCreationException;
+import org.gradle.problems.Location;
+import org.gradle.problems.buildtree.ProblemDiagnosticsFactory;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 
-public class DefaultExceptionAnalyser implements ExceptionCollector, ScriptExecutionListener {
-    private final Map<String, ScriptSource> scripts = new HashMap<>();
+public class DefaultExceptionAnalyser implements ExceptionCollector {
+    private final ProblemDiagnosticsFactory diagnosticsFactory;
 
-    public DefaultExceptionAnalyser(ListenerManager listenerManager) {
-        listenerManager.addListener(this);
-    }
-
-    @Override
-    public void onScriptClassLoaded(ScriptSource source, Class<?> scriptClass) {
-        scripts.put(source.getFileName(), source);
+    public DefaultExceptionAnalyser(ProblemDiagnosticsFactory diagnosticsFactory) {
+        this.diagnosticsFactory = diagnosticsFactory;
     }
 
     @Override
@@ -74,13 +70,13 @@ public class DefaultExceptionAnalyser implements ExceptionCollector, ScriptExecu
             return actualException;
         }
 
-        ScriptSource source = null;
+        String source = null;
         Integer lineNumber = null;
 
         // TODO: remove these special cases
         if (actualException instanceof ScriptCompilationException) {
             ScriptCompilationException scriptCompilationException = (ScriptCompilationException) actualException;
-            source = scriptCompilationException.getScriptSource();
+            source = scriptCompilationException.getScriptSource().getLongDisplayName().getCapitalizedDisplayName();
             lineNumber = scriptCompilationException.getLineNumber();
         }
 
@@ -90,12 +86,10 @@ public class DefaultExceptionAnalyser implements ExceptionCollector, ScriptExecu
                 currentException != null;
                 currentException = currentException.getCause()
             ) {
-                for (StackTraceElement element : currentException.getStackTrace()) {
-                    if (element.getLineNumber() >= 0 && scripts.containsKey(element.getFileName())) {
-                        source = scripts.get(element.getFileName());
-                        lineNumber = element.getLineNumber();
-                        break;
-                    }
+                Location location = diagnosticsFactory.forException(currentException).getLocation();
+                if (location != null) {
+                    source = location.getSourceLongDisplayName().getCapitalizedDisplayName();
+                    lineNumber = location.getLineNumber();
                 }
             }
         }
@@ -103,12 +97,20 @@ public class DefaultExceptionAnalyser implements ExceptionCollector, ScriptExecu
         return new LocationAwareException(actualException, source, lineNumber);
     }
 
-    private Throwable findDeepestRootException(Throwable exception) {
+    private static Throwable findDeepestRootException(Throwable exception) {
         // TODO: fix the way we work out which exception is important: TaskExecutionException is not always the most helpful
         Throwable locationAware = null;
         Throwable result = null;
         Throwable contextMatch = null;
-        for (Throwable current = exception; current != null; current = current.getCause()) {
+        // Guard against malicious overrides of Throwable.equals by
+        // using a Set with identity equality semantics.
+        Set<Throwable> dejaVu = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Throwable current = exception, parent = null; current != null; parent = current, current = current.getCause()) {
+            if (!dejaVu.add(current)) {
+                if (parent != null) {
+                    current = patchCircularCause(current, parent);
+                }
+            }
             if (current instanceof LocationAwareException) {
                 locationAware = current;
             } else if (current instanceof GradleScriptException || current instanceof TaskExecutionException) {
@@ -125,6 +127,20 @@ public class DefaultExceptionAnalyser implements ExceptionCollector, ScriptExecu
             return contextMatch;
         } else {
             return exception;
+        }
+    }
+
+    private static Throwable patchCircularCause(Throwable current, Throwable parent) {
+        try {
+            Field causeField = Throwable.class.getDeclaredField("cause");
+            causeField.setAccessible(true);
+            Throwable replacement = new Throwable("[CIRCULAR REFERENCE: " + current + "]");
+            replacement.setStackTrace(current.getStackTrace());
+            causeField.set(parent, replacement);
+            return replacement;
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            // Couldn't replace the cause, let's return the actual exception.
+            return current;
         }
     }
 }

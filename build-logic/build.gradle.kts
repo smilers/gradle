@@ -1,4 +1,5 @@
 plugins {
+    id("gradlebuild.collect-failed-tasks")
     id("gradlebuild.cache-miss-monitor")
 }
 
@@ -9,14 +10,14 @@ tasks.register("check") {
 }
 
 val clean by tasks.registering {
-    val buildSrcPropertiesFile = layout.projectDirectory.file("gradle.properties")
+    val buildLogicPropertiesFile = layout.projectDirectory.file("gradle.properties")
     val rootPropertiesFile = layout.projectDirectory.file("../gradle.properties")
     doLast {
-        val buildSrcProperties = readProperties(buildSrcPropertiesFile.asFile)
+        val buildLogicProperties = readProperties(buildLogicPropertiesFile.asFile)
         val rootProperties = readProperties(rootPropertiesFile.asFile)
-        val jvmArgs = listOf(buildSrcProperties, rootProperties).map { it.getProperty("org.gradle.jvmargs") }.toSet()
+        val jvmArgs = listOf(buildLogicProperties, rootProperties).map { it.getProperty("org.gradle.jvmargs") }.toSet()
         if (jvmArgs.size > 1) {
-            throw GradleException("gradle.properties and buildSrc/gradle.properties have different org.gradle.jvmargs " +
+            throw GradleException("gradle.properties and build-logic/gradle.properties have different org.gradle.jvmargs " +
                 "which may cause two daemons to be spawned on CI and in IDEA. " +
                 "Use the same org.gradle.jvmargs for both builds.")
         }
@@ -24,5 +25,5 @@ val clean by tasks.registering {
 }
 
 fun readProperties(propertiesFile: File) = java.util.Properties().apply {
-    propertiesFile.inputStream().use { fis ->  load(fis) }
+    propertiesFile.inputStream().use { fis -> load(fis) }
 }

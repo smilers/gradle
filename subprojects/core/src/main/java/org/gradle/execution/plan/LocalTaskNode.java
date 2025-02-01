@@ -16,25 +16,21 @@
 
 package org.gradle.execution.plan;
 
-import org.gradle.api.Action;
-import org.gradle.api.file.FileCollection;
 import org.gradle.api.internal.TaskInternal;
 import org.gradle.api.internal.file.FileCollectionFactory;
 import org.gradle.api.internal.project.ProjectInternal;
-import org.gradle.api.internal.tasks.TaskContainerInternal;
 import org.gradle.api.internal.tasks.properties.DefaultTaskProperties;
-import org.gradle.api.internal.tasks.properties.OutputFilePropertySpec;
-import org.gradle.api.internal.tasks.properties.PropertyWalker;
 import org.gradle.api.internal.tasks.properties.TaskProperties;
-import org.gradle.api.tasks.TaskExecutionException;
 import org.gradle.internal.execution.WorkValidationContext;
+import org.gradle.internal.properties.bean.PropertyWalker;
 import org.gradle.internal.resources.ResourceLock;
 import org.gradle.internal.service.ServiceRegistry;
 
 import javax.annotation.Nullable;
-import java.io.File;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * A {@link TaskNode} implementation for a task in the current build.
@@ -43,16 +39,19 @@ public class LocalTaskNode extends TaskNode {
     private final TaskInternal task;
     private final WorkValidationContext validationContext;
     private final ResolveMutationsNode resolveMutationsNode;
+    private boolean hasVisitedMutationsNode;
     private Set<Node> lifecycleSuccessors;
 
     private boolean isolated;
     private List<? extends ResourceLock> resourceLocks;
     private TaskProperties taskProperties;
+    private ProjectInternal taskProject;
 
-    public LocalTaskNode(TaskInternal task, NodeValidator nodeValidator, WorkValidationContext workValidationContext) {
+    public LocalTaskNode(TaskInternal task, WorkValidationContext workValidationContext, Function<LocalTaskNode, ResolveMutationsNode> resolveNodeFactory) {
         this.task = task;
         this.validationContext = workValidationContext;
-        resolveMutationsNode = new ResolveMutationsNode(this, nodeValidator);
+        this.resolveMutationsNode = resolveNodeFactory.apply(this);
+        this.taskProject = (ProjectInternal) task.getProject();
     }
 
     /**
@@ -73,7 +72,7 @@ public class LocalTaskNode extends TaskNode {
             return null;
         } else {
             // Running the task requires permission to execute against its containing project
-            return ((ProjectInternal) task.getProject()).getOwner().getTaskExecutionLock();
+            return taskProject.getOwner().getTaskExecutionLock();
         }
     }
 
@@ -81,7 +80,7 @@ public class LocalTaskNode extends TaskNode {
     @Override
     public ProjectInternal getOwningProject() {
         // Task requires its owning project's execution services
-        return (ProjectInternal) task.getProject();
+        return taskProject;
     }
 
     @Override
@@ -102,21 +101,14 @@ public class LocalTaskNode extends TaskNode {
         return true;
     }
 
-    @Override
-    public boolean isCanCancel() {
-        FinalizerGroup finalizerGroup = getFinalizerGroup();
-        if (finalizerGroup != null) {
-            for (Node node : finalizerGroup.getSuccessors()) {
-                // Cannot cancel this node if something it finalizes has started
-                if (node.isExecuting() || node.isExecuted()) {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
     public TaskProperties getTaskProperties() {
+        if (taskProperties == null) {
+            ServiceRegistry serviceRegistry = taskProject.getServices();
+            final FileCollectionFactory fileCollectionFactory = serviceRegistry.get(FileCollectionFactory.class);
+            PropertyWalker propertyWalker = serviceRegistry.get(PropertyWalker.class);
+            taskProperties = DefaultTaskProperties.resolve(propertyWalker, fileCollectionFactory, task);
+        }
+
         return taskProperties;
     }
 
@@ -126,12 +118,10 @@ public class LocalTaskNode extends TaskNode {
     }
 
     @Override
-    public void prepareForExecution(Action<Node> monitor) {
-        ((TaskContainerInternal) task.getProject().getTasks()).prepareForExecution(task);
-    }
-
-    @Override
     public void resolveDependencies(TaskDependencyResolver dependencyResolver) {
+        // Make sure it has been configured
+        taskProject.getTasks().prepareForExecution(task);
+
         for (Node targetNode : getDependencies(dependencyResolver)) {
             addDependencySuccessor(targetNode);
         }
@@ -145,7 +135,7 @@ public class LocalTaskNode extends TaskNode {
             addFinalizerNode((TaskNode) targetNode);
         }
         for (Node targetNode : getMustRunAfter(dependencyResolver)) {
-            addMustSuccessor((TaskNode) targetNode);
+            addMustSuccessor(targetNode);
         }
         for (Node targetNode : getShouldRunAfter(dependencyResolver)) {
             addShouldSuccessor(targetNode);
@@ -178,65 +168,36 @@ public class LocalTaskNode extends TaskNode {
         return task.getIdentityPath().toString();
     }
 
-    private void addOutputFilesToMutations(Set<OutputFilePropertySpec> outputFilePropertySpecs) {
-        final MutationInfo mutations = getMutationInfo();
-        outputFilePropertySpecs.forEach(spec -> {
-            File outputLocation = spec.getOutputFile();
-            if (outputLocation != null) {
-                mutations.outputPaths.add(outputLocation.getAbsolutePath());
-            }
-            mutations.hasOutputs = true;
-        });
-    }
-
-    private void addLocalStateFilesToMutations(FileCollection localStateFiles) {
-        final MutationInfo mutations = getMutationInfo();
-        localStateFiles.forEach(file -> {
-            mutations.outputPaths.add(file.getAbsolutePath());
-            mutations.hasLocalState = true;
-        });
-    }
-
-    private void addDestroyablesToMutations(FileCollection destroyables) {
-        destroyables
-            .forEach(file -> getMutationInfo().destroyablePaths.add(file.getAbsolutePath()));
+    @Override
+    public boolean hasPendingPreExecutionNodes() {
+        return !hasVisitedMutationsNode;
     }
 
     @Override
+    public void visitPreExecutionNodes(Consumer<? super Node> visitor) {
+        if (!hasVisitedMutationsNode) {
+            visitor.accept(resolveMutationsNode);
+            hasVisitedMutationsNode = true;
+        }
+    }
+
     public Node getPrepareNode() {
         return resolveMutationsNode;
     }
 
-    public void resolveMutations() {
-        final LocalTaskNode taskNode = this;
-        final TaskInternal task = getTask();
-        final MutationInfo mutations = getMutationInfo();
-        ProjectInternal project = (ProjectInternal) task.getProject();
-        ServiceRegistry serviceRegistry = project.getServices();
-        final FileCollectionFactory fileCollectionFactory = serviceRegistry.get(FileCollectionFactory.class);
-        PropertyWalker propertyWalker = serviceRegistry.get(PropertyWalker.class);
-        try {
-            taskProperties = DefaultTaskProperties.resolve(propertyWalker, fileCollectionFactory, task);
-
-            addOutputFilesToMutations(taskProperties.getOutputFileProperties());
-            addLocalStateFilesToMutations(taskProperties.getLocalStateFiles());
-            addDestroyablesToMutations(taskProperties.getDestroyableFiles());
-
-            mutations.hasFileInputs = !taskProperties.getInputFileProperties().isEmpty();
-        } catch (Exception e) {
-            throw new TaskExecutionException(task, e);
+    @Override
+    public void markFailedDueToDependencies(Consumer<Node> completionAction) {
+        super.markFailedDueToDependencies(completionAction);
+        if (!resolveMutationsNode.isComplete()) {
+            resolveMutationsNode.markFailedDueToDependencies(completionAction);
         }
+    }
 
-        if (!mutations.destroyablePaths.isEmpty()) {
-            if (mutations.hasOutputs) {
-                throw new IllegalStateException("Task " + taskNode + " has both outputs and destroyables defined.  A task can define either outputs or destroyables, but not both.");
-            }
-            if (mutations.hasFileInputs) {
-                throw new IllegalStateException("Task " + taskNode + " has both inputs and destroyables defined.  A task can define either inputs or destroyables, but not both.");
-            }
-            if (mutations.hasLocalState) {
-                throw new IllegalStateException("Task " + taskNode + " has both local state and destroyables defined.  A task can define either local state or destroyables, but not both.");
-            }
+    @Override
+    public void cancelExecution(Consumer<Node> completionAction) {
+        super.cancelExecution(completionAction);
+        if (resolveMutationsNode.isRequired()) {
+            resolveMutationsNode.cancelExecution(completionAction);
         }
     }
 
@@ -254,7 +215,7 @@ public class LocalTaskNode extends TaskNode {
      * Used to determine whether a {@link Node} consumes the <b>outcome</b> of a successor task vs. its output(s).
      *
      * @param dependency a non-successful successor node in the execution plan
-     * @return true if the successor node dependency was declared with an explicit dependsOn relationship, false otherwise (implying task output -> task input relationship)
+     * @return true if the successor node dependency was declared with an explicit dependsOn relationship, false otherwise (implying task output to task input relationship)
      */
     @Override
     protected boolean dependsOnOutcome(Node dependency) {

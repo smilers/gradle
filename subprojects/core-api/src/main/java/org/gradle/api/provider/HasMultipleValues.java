@@ -16,6 +16,8 @@
 
 package org.gradle.api.provider;
 
+import org.gradle.api.SupportsKotlinAssignmentOverloading;
+
 import javax.annotation.Nullable;
 
 /**
@@ -26,7 +28,8 @@ import javax.annotation.Nullable;
  * @param <T> the type of elements.
  * @since 4.5
  */
-public interface HasMultipleValues<T> extends HasConfigurableValue {
+@SupportsKotlinAssignmentOverloading
+public interface HasMultipleValues<T> extends HasConfigurableValue, SupportsConvention {
     /**
      * Sets the value of the property to the elements of the given iterable, and replaces any existing value. This property will query the elements of the iterable each time the value of this property is queried.
      *

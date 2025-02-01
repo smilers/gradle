@@ -19,13 +19,21 @@ import org.gradle.StartParameter;
 import org.gradle.api.internal.GradleInternal;
 import org.gradle.api.internal.SettingsInternal;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
+import org.gradle.internal.service.scopes.Scope;
+import org.gradle.internal.service.scopes.ServiceScope;
 
 /**
  * Responsible for locating, constructing, and configuring the {@link SettingsInternal} for a build.
  */
+@ServiceScope(Scope.Build.class)
 public interface SettingsProcessor {
-    SettingsInternal process(GradleInternal gradle,
-                             SettingsLocation settingsLocation,
-                             ClassLoaderScope buildRootClassLoaderScope,
-                             StartParameter startParameter);
+    /**
+     * Load the settings for the given build. The caller is responsible for closing the return value.
+     */
+    SettingsState process(
+        GradleInternal gradle,
+        SettingsLocation settingsLocation,
+        ClassLoaderScope buildRootClassLoaderScope,
+        StartParameter startParameter
+    );
 }
